@@ -112,7 +112,7 @@ Undo 的范围是：
 例如当前 session 的工作区是：
 
 ```text
-C:\Users\YT16228\Desktop\test
+C:\Users\<user>\Desktop\test
 ```
 
 插件只会比较和恢复该目录以内、且被快照规则允许的文件。它不是“恢复整台电脑”，也不是“恢复所有 Agent 访问过的路径”。
@@ -143,14 +143,14 @@ Undo 只恢复两次快照之间发生变化的文件：
 例如当前 workspace 是：
 
 ```text
-C:\Users\YT16228\Desktop\test
+C:\Users\<user>\Desktop\test
 ```
 
 Agent 修改了：
 
 ```text
-C:\Users\YT16228\Desktop\test\a.txt
-C:\Users\YT16228\Desktop\other\b.txt
+C:\Users\<user>\Desktop\test\a.txt
+C:\Users\<user>\Desktop\other\b.txt
 ```
 
 执行 `/undo` 时：

@@ -19,7 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      # TODO: re-add `cache: pnpm` to setup-node once a pnpm-lock.yaml is
+      # committed; the cache step fails on repos without a lockfile.
+      - run: pnpm install --no-frozen-lockfile
       - run: pnpm lint
       - run: pnpm test

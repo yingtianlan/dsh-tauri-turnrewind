@@ -1,0 +1,56 @@
+{
+  "name": "dsh-tauri-turnrewind",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Turn-aware workspace undo for DeepSeek Harness — private snapshot per turn, red/green diff preview, in-card confirm",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yingtianlan/dsh-tauri-turnrewind.git"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "undo",
+    "snapshot",
+    "diff",
+    "plugin"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "main": "lib/index.js",
+  "files": [
+    "README.md",
+    "cordis.patch.yml",
+    "lib"
+  ],
+  "dsh": {
+    "runtime": "host",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "scripts": {
+    "test": "vitest run test --testTimeout=30000",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^9.3.0",
+    "eslint": "^10.8.1",
+    "vitest": "^4.1.11"
+  }
+}

@@ -24,18 +24,37 @@ for (const file of files)
   cpSync(join(pluginRoot, file), join(process.cwd(), file))
 
 // package.json: take the dev manifest, keep this repo's publishing fields.
+// Keys are emitted in the order the repo's jsonc/sort-keys rule expects,
+// otherwise CI lint fails on every sync.
 const dev = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'))
 const repoManifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
-const merged = {
-  ...dev,
-  version: repoManifest.version,
-  repository: repoManifest.repository,
-  keywords: repoManifest.keywords,
-  license: repoManifest.license,
-  devDependencies: repoManifest.devDependencies,
-  scripts: repoManifest.scripts,
+const merged = { ...dev, ...repoManifest }
+const keyOrder = [
+  'name',
+  'type',
+  'version',
+  'description',
+  'license',
+  'repository',
+  'keywords',
+  'exports',
+  'main',
+  'files',
+  'dsh',
+  'engines',
+  'scripts',
+  'devDependencies',
+]
+const ordered = {}
+for (const key of keyOrder) {
+  if (merged[key] !== undefined)
+    ordered[key] = merged[key]
 }
-writeFileSync(join(process.cwd(), 'package.json'), `${JSON.stringify(merged, null, 2)}\n`)
+for (const [key, value] of Object.entries(merged)) {
+  if (ordered[key] === undefined)
+    ordered[key] = value
+}
+writeFileSync(join(process.cwd(), 'package.json'), `${JSON.stringify(ordered, null, 2)}\n`)
 
 console.log('synced from', pluginRoot)
 console.log('next: pnpm lint && pnpm test, then bump version and push')

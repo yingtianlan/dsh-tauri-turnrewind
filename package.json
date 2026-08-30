@@ -3,6 +3,19 @@
   "type": "module",
   "version": "0.1.0",
   "description": "Local turn-aware workspace undo for DeepSeek Harness",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yingtianlan/dsh-tauri-turnrewind.git"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "undo",
+    "snapshot",
+    "diff",
+    "plugin"
+  ],
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
@@ -39,18 +52,5 @@
     "@antfu/eslint-config": "^9.3.0",
     "eslint": "^10.8.1",
     "vitest": "^4.1.11"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yingtianlan/dsh-tauri-turnrewind.git"
-  },
-  "keywords": [
-    "dsh",
-    "deepseek-harness",
-    "undo",
-    "snapshot",
-    "diff",
-    "plugin"
-  ],
-  "license": "MIT"
+  }
 }

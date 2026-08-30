@@ -1,19 +1,8 @@
 # dsh-tauri-turnrewind
 
-DeepSeek Harness（dsh）的 turn 级工作区撤销插件：为每次 Agent turn 建立私有 Git 快照，`/undo` 一键预览并回滚该轮文件改动。
+本地开发中的 DSH turn 回滚插件。
 
-## 安装
-
-在 DSH 会话里执行：
-
-```bash
-dsh plugin add github:yingtianlan/dsh-tauri-turnrewind
-```
-
-桌面端也可通过插件市场安装。安装后重启 DSH 生效。
-
-> **实验性版本**：恢复路径直接使用 Node/Git（未接入宿主 sandbox/Tauri bridge）。
-> 首次在重要项目上使用时，建议先 `/undo --preview` 确认无误。已知边界见文末。
+> 当前 `cordis.patch.yml` 已为本地 debug profile 的实验启用而挂载插件。它仍是原型：恢复路径直接使用 Node/Git，尚未接入受控的宿主 sandbox/Tauri bridge；仅可在可丢弃的测试工作区中启用，不能作为生产功能使用。
 
 ## 当前状态
 
@@ -25,14 +14,13 @@ dsh plugin add github:yingtianlan/dsh-tauri-turnrewind
 - **git 可用性探测**：系统没有 git 时，turn 显式记为 `skipped`（原因 `TURNREWIND_GIT_UNAVAILABLE`），而不是静默失败；
 - **快照链自愈**：私有快照仓库被删/损坏后，下一次捕获自动降级重建基线（日志有一条 warning），后续 turn 照常可撤销；被清空前留下来的旧 turn 会在 `/undo` 选目标时自动识别为死快照并标记跳过（`snapshot ref missing`），不会甩出 git 原始报错；
 - **工作区资格守卫**：家目录、家目录的祖先、盘根目录，以及超过快照预算（文件数 / 总大小 / 单文件大小）的目录不做快照，turn 记为 `skipped` 并向 `/undo` 说明原因（见「工作区资格与快照预算」）；
-- **不可用弹窗**：客户端半（`lib/client.js`）通过 `turnrewind` 会话投影检测到不可用提示时，在 Web UI 内弹出模态对话框（中英双语、跟随应用主题、每个浏览器只弹一次）；`/undo` 输出使用 harness 原生命令卡片样式（错误为红色提示），不做自定义渲染；
-- 注册人类命令 `/undo`；
-- `/undo` 只处理当前会话最新的单个可恢复 turn；
-- `/undo --dry-run` 只输出预检计划（逐文件分类：修改/新建/删除），不修改文件；
-- `/undo --preview` 额外输出每个文件撤销时将应用的 unified diff；
+- **不可用弹窗**：客户端半（`lib/client.js`）通过 `turnrewind` 会话投影检测到不可用提示时，在 Web UI 内弹出模态对话框（中英双语、跟随应用主题、每个浏览器只弹一次）；
+- **两阶段 `/undo`**：先出预览卡（红绿 diff + `+x -y` 徽标 + 文件清单），卡内 ✓/✗ 按钮确认执行或取消——不看预览就不会误执行；计划 5 分钟过期，确认时二次校验磁盘；
 - 恢复前比较当前文件与 turn 完成时的快照，发现变化则拒绝覆盖，并给出「turn 产物 → 当前磁盘」的冲突 diff；
-- 冲突可用 `--skip-conflicts`（只恢复无冲突文件）或 `--force`（强制覆盖）处理；
+- 冲突可用 `--skip-conflicts`（只恢复无冲突文件）或 `--force`（强制覆盖）直接执行；
 - `/undo --redo` 重做最近一次已应用的 undo（磁盘在 undo 后被改动则拒绝）；
+- 注册人类命令 `/undo`；
+- `/undo` 默认处理当前会话最新的单个可恢复 turn，也可指定完整 turn ID；
 - 同一 workspace 的活动 turn 或 undo 操作互斥；
 - 插件重启时将未完成 turn 标记为 abandoned；
 - 每次 Undo/Redo 的回退提示独立持久化；下一次模型 step 一次性注入全部 pending notice；
@@ -43,33 +31,34 @@ dsh plugin add github:yingtianlan/dsh-tauri-turnrewind
 在已加载本插件的 DSH 会话中：
 
 ```text
-/undo --dry-run
-```
-
-先查看撤销预检。它只检查，不修改文件。
-
-确认预检结果中的文件和冲突数量正确后，再执行：
-
-```text
 /undo
 ```
 
-也可以指定完整 turn ID：
+默认进入**两阶段流程**：先输出预览卡（每个文件的红绿 diff 与 `+x -y` 徽标），
+卡内附两个按钮——**✓ 执行撤销** 与 **✕ 取消**。点 ✓ 才会真正恢复文件；
+不点击的话计划 5 分钟后自动过期，不会误执行。确认时还会二次校验磁盘，
+预览之后文件又被改动过（冲突）会拒绝执行并提示重新预览。
+
+也可以指定完整 turn ID、或只看计划不动手：
 
 ```text
 /undo <session-id>:<turn-number>
+/undo --dry-run      # 仅输出文件清单与分类，不含 diff
+/undo --preview      # 输出内容与 /undo 的预览卡一致
 ```
 
-当前支持的命令：
+磁盘在预览后又被改动（冲突）时，可以选择处理策略：
 
 ```text
-/undo
-/undo --dry-run
-/undo --preview
-/undo <turn-id>
-/undo --skip-conflicts
-/undo --force
-/undo --redo
+/undo --skip-conflicts   # 只恢复无冲突文件，跳过的文件会列出
+/undo --force            # 强制覆盖冲突文件（执行前仍有回滚点保护）
+```
+
+其他：
+
+```text
+/undo --redo                # 重做最近一次已应用的 undo
+/undo --cancel <plan-id>    # 取消一个待确认的预览计划
 ```
 
 当前不支持：
@@ -351,11 +340,9 @@ secrets.*          # 仅根目录
 
 这些规则意味着：被排除文件的变化不会进入本 turn 的 Undo 范围。插件仍是实验原型，不应把它当作秘密信息保护工具。
 
-## 从源码开发（面向插件开发者）
+## Debug 安装
 
-插件功能在桌面主仓库（deepseek-harness-desktop）的 `plugins/dsh-tauri-turnrewind/`
-下开发，以 `link:` 方式挂进 debug profile 真机验证；本仓库为发布镜像，用
-`node scripts/sync.mjs <桌面仓库路径>` 同步源码。在桌面 checkout 中：
+在当前 checkout 中执行：
 
 ```powershell
 pnpm exec vitest run plugins/dsh-tauri-turnrewind/test --testTimeout=30000
@@ -378,14 +365,13 @@ pnpm exec vitest run plugins/dsh-tauri-turnrewind/test --testTimeout=30000
 
 ## 当前限制
 
-这是实验版本，正式启用前仍需要：
+这是实验性版本，正式启用前仍需要：
 
 - 接入受控的宿主 sandbox/Tauri bridge；
-- 完成 DSH lifecycle integration tests；
+- 完成真实 DSH lifecycle integration tests；
 - 快照容量治理：按 turn 数/容量/保留期清理旧 snapshot ref（当前只做断链自愈，不清理历史）；
 - 完善 Git 仓库工作区的增量基线（参考 OpenCode：共享用户对象库 + 仅 stage 变更路径）；
 - 完善多 workspace 并发锁；
 - 实现父对话递归 undo；
-- 实现 redo 和冲突处理 UI；
 - 实现消息旁 Undo 按钮；
 - 明确二进制、重命名、权限位和特殊文件策略。

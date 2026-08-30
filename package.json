@@ -2,7 +2,7 @@
   "name": "dsh-tauri-turnrewind",
   "type": "module",
   "version": "0.1.0",
-  "description": "Turn-aware workspace undo for DeepSeek Harness — private snapshot per turn, red/green diff preview, in-card confirm",
+  "description": "Local turn-aware workspace undo for DeepSeek Harness",
   "license": "MIT",
   "repository": {
     "type": "git",

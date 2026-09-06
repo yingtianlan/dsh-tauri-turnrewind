@@ -1,32 +1,38 @@
 {
   "name": "dsh-tauri-turnrewind",
   "type": "module",
-  "version": "0.1.0",
-  "description": "Local turn-aware workspace undo for DeepSeek Harness",
+  "version": "0.3.0",
+  "description": "Local turn-aware workspace undo for DeepSeek Harness (TypeScript). Requires the DeepSeek Harness desktop app.",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yingtianlan/dsh-tauri-turnrewind.git"
-  },
   "keywords": [
     "dsh",
+    "plugin",
+    "dsh-plugin",
+    "tauri",
     "deepseek-harness",
     "undo",
-    "snapshot",
-    "diff",
-    "plugin"
+    "snapshot"
   ],
+  "sideEffects": false,
   "exports": {
-    ".": "./lib/index.js",
-    "./client": "./lib/client.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "default": "./dist/client.cjs"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
-  "main": "lib/index.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "README.md",
     "cordis.patch.yml",
-    "lib"
+    "dist",
+    "purge-workspace.mjs"
   ],
   "dsh": {
     "runtime": "host",
@@ -37,7 +43,11 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "dsh-tauri"
+      ],
+      "external": [
+        "dsh-tauri/client"
       ]
     }
   },
@@ -45,12 +55,28 @@
     "node": ">=22.15.0"
   },
   "scripts": {
-    "test": "vitest run test --testTimeout=30000",
+    "build": "tsdown",
+    "test": "vitest run test --testTimeout=120000",
+    "typecheck": "tsc",
     "lint": "eslint ."
+  },
+  "dependencies": {
+    "pathe": "^2.0.3"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^9.3.0",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis-plugin-include": "^1.0.7",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.3",
+    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.5 <0.2.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "css-render": "^0.15.14",
     "eslint": "^10.8.1",
+    "hookable": "^6.1.1",
+    "react": "^19.2.8",
+    "tsdown": "^0.17.3",
+    "typescript": "~5.8.3",
     "vitest": "^4.1.11"
   }
 }

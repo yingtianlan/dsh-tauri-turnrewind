@@ -21,5 +21,10 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
       - run: pnpm lint
+      # dist/ 是提交进仓库的（安装零构建）；CI 同时验证它不落后于 src。
+      - run: pnpm build
+      - name: Verify committed dist is up to date
+        run: git diff --exit-code -- dist
       - run: pnpm test

@@ -1,6 +1,4 @@
-shellEmulator: true
-
+minimumReleaseAgeExcludePrune: true
 trustPolicy: no-downgrade
-
-packages:
-  - .
+shellEmulator: true
+packages: []

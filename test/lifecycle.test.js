@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, resolve } from 'pathe'
 import { it } from 'vitest'
-import { captureSnapshot, createSnapshotStore } from '../lib/core/git-snapshot.js'
-import { getTurn, insertTurn, openLedger, settleTurn } from '../lib/core/ledger.js'
-import { applyUndo } from '../lib/index.js'
+import { captureSnapshot, createSnapshotStore } from '../src/host/service/git-snapshot'
+import { getTurn, insertTurn, openLedger, settleTurn } from '../src/host/service/ledger'
+import { applyUndo, waitForTurnBaseline } from '../src/index'
+import { initGitWorkspace } from './git-test-utils.js'
 
 async function setupTurn() {
   const root = await mkdtemp(join(tmpdir(), 'turnrewind-lifecycle-test-'))
   const workspace = join(root, 'workspace')
-  await mkdir(workspace, { recursive: true })
+  await initGitWorkspace(workspace)
   await writeFile(join(workspace, 'a.txt'), 'v1\n')
   const db = openLedger(join(root, 'ledger'))
   const store = createSnapshotStore(join(root, 'data'), workspace)
@@ -106,30 +107,22 @@ it('forces a restore over a conflicted file', async () => {
   }
 })
 
-it('round-trips undo and redo', async () => {
+it('applies a confirmed undo and reports redo as disabled', { timeout: 30000 }, async () => {
   const { root, workspace, db, runtime, active, invocation } = await setupTurn()
   try {
     const undo = await undoWithConfirm(runtime, active, invocation)
     assert.equal(undo.kind, 'success')
     assert.equal(await readFile(join(workspace, 'a.txt'), 'utf8'), 'v1\n')
     await assert.rejects(stat(join(workspace, 'c.txt')))
+    assert.equal(getTurn(db, 'session:1').status, 'undone')
 
+    // Redo is frozen at the parser: even with a clean workspace the entry
+    // refuses before any snapshot/conflict work happens.
     const redo = await applyUndo(runtime, active, invocation('--redo'))
-    assert.equal(redo.kind, 'success')
-    assert.match(redo.text, /re-applied 2 file\(s\)/u)
-    assert.equal(await readFile(join(workspace, 'a.txt'), 'utf8'), 'v2\n')
-    assert.equal(await readFile(join(workspace, 'c.txt'), 'utf8'), 'new\n')
-    assert.equal(getTurn(db, 'session:1').status, 'settled')
-
-    // The turn is reversible again after the redo.
-    const undoAgain = await undoWithConfirm(runtime, active, invocation)
-    assert.equal(undoAgain.kind, 'success')
+    assert.equal(redo.kind, 'error')
+    assert.match(redo.text, /temporarily disabled/u)
     assert.equal(await readFile(join(workspace, 'a.txt'), 'utf8'), 'v1\n')
-
-    // A second redo targets the new undo operation.
-    const redoAgain = await applyUndo(runtime, active, invocation('--redo'))
-    assert.equal(redoAgain.kind, 'success')
-    assert.equal(await readFile(join(workspace, 'a.txt'), 'utf8'), 'v2\n')
+    assert.equal(getTurn(db, 'session:1').status, 'undone')
   }
   finally {
     db.close()
@@ -137,17 +130,25 @@ it('round-trips undo and redo', async () => {
   }
 })
 
-it('blocks redo when the disk changed after the undo', async () => {
+it('rejects a confirm whose change set drifted from the preview', async () => {
   const { root, workspace, db, runtime, active, invocation } = await setupTurn()
   try {
-    const undo = await undoWithConfirm(runtime, active, invocation)
-    assert.equal(undo.kind, 'success')
-    await writeFile(join(workspace, 'a.txt'), 'edited-after-undo\n')
-    const redo = await applyUndo(runtime, active, invocation('--redo'))
-    assert.equal(redo.kind, 'error')
-    assert.match(redo.text, /Redo is blocked/u)
-    assert.match(redo.text, /\+edited-after-undo/u)
-    assert.equal(getTurn(db, 'session:1').status, 'undone')
+    const preview = await applyUndo(runtime, active, invocation())
+    assert.equal(preview.kind, 'success')
+    const planId = /plan ([0-9a-f-]+)/u.exec(preview.text)?.[1]
+    assert.ok(planId, 'preview must carry a pending plan id')
+
+    // Simulate plan drift: the persisted binding no longer matches what the
+    // confirm recomputes. The confirm must refuse and release the claim.
+    db.prepare('UPDATE pending_plans SET paths_digest = ? WHERE plan_id = ?').run('0'.repeat(64), planId)
+    const confirmed = await applyUndo(runtime, active, invocation(`--confirm ${planId}`))
+    assert.equal(confirmed.kind, 'error')
+    assert.match(confirmed.text, /change set no longer matches/u)
+
+    // Nothing was restored and the plan stays pending for a fresh confirm.
+    assert.equal(await readFile(join(workspace, 'a.txt'), 'utf8'), 'v2\n')
+    const row = db.prepare('SELECT status FROM pending_plans WHERE plan_id = ?').get(planId)
+    assert.equal(row.status, 'pending')
   }
   finally {
     db.close()
@@ -166,4 +167,48 @@ it('rejects invalid option combinations', async () => {
     db.close()
     await rm(root, { recursive: true, force: true })
   }
+})
+
+it('waits for a claimed turn baseline before allowing the next step', async () => {
+  let release
+  const baseline = new Promise((resolvePromise) => {
+    release = resolvePromise
+  })
+  const active = new Map([
+    ['session:7', { baseline: { promise: baseline } }],
+  ])
+  const controller = new AbortController()
+  let continued = false
+  const waiting = waitForTurnBaseline(active, 'session', 7, controller.signal).then((result) => {
+    continued = true
+    assert.equal(result.ok, true)
+  })
+
+  await Promise.resolve()
+  assert.equal(continued, false)
+  release({ ok: true })
+  await waiting
+  assert.equal(continued, true)
+})
+
+it('unblocks an aborted pre-step without cancelling baseline bookkeeping', async () => {
+  let release
+  const baseline = new Promise((resolvePromise) => {
+    release = resolvePromise
+  })
+  const active = new Map([
+    ['session:8', { baseline: { promise: baseline } }],
+  ])
+  const controller = new AbortController()
+  const waiting = waitForTurnBaseline(active, 'session', 8, controller.signal)
+  controller.abort(new Error('turn interrupted'))
+  await assert.rejects(waiting, /turn interrupted/u)
+
+  let baselineCompleted = false
+  const bookkeeping = baseline.then((result) => {
+    baselineCompleted = result.ok
+  })
+  release({ ok: true })
+  await bookkeeping
+  assert.equal(baselineCompleted, true)
 })

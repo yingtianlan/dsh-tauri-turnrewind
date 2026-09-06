@@ -1,0 +1,3 @@
+import { _ as workspaceHash, a as diffAgainstDisk, c as gitRef, d as restorePath, f as runGit, g as stateAt, h as snapshotFileDiff, i as currentState, l as probeWorkspace, m as snapshotDiff, n as classifyPathChange, o as gitAvailable, p as runGitText, r as createSnapshotStore, s as gitExitIsClean, t as captureSnapshot, u as restoreCrashedSwaps, v as workspaceKey } from "./git-snapshot-DZ_Ahv7d.js";
+
+export { currentState, diffAgainstDisk };

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'vitest'
-import { createDialogProjection, extractUnsupportedNotice } from '../lib/core/dialog-projection.js'
+import { createDialogProjection, extractUnsupportedNotice } from '../src/host/service/dialog-projection'
 
 function unsupportedEvent(id, reason, withSource = true) {
   const text = `[Turn rewind unavailable]\nUndo is disabled for this workspace.\nReason: ${reason}\n\nTurns here still run normally.`

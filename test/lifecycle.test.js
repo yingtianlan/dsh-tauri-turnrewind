@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'pathe'
+import { join } from 'pathe'
 import { it } from 'vitest'
-import { captureSnapshot, createSnapshotStore } from '../src/host/service/git-snapshot'
+import { captureSnapshot, createSnapshotStore, workspaceKey } from '../src/host/service/git-snapshot'
 import { getTurn, insertTurn, openLedger, settleTurn } from '../src/host/service/ledger'
 import { applyUndo, waitForTurnBaseline } from '../src/index'
 import { initGitWorkspace } from './git-test-utils.js'
@@ -22,7 +22,7 @@ async function setupTurn() {
   insertTurn(db, {
     turnId: 'session:1',
     sessionId: 'session',
-    workspaceKey: resolve(workspace).toLowerCase(),
+    workspaceKey: workspaceKey(workspace),
     startedAt: '2026-01-01T00:00:00.000Z',
     beforeRef: 'refs/turnrewind/t1-before',
   })
@@ -30,7 +30,7 @@ async function setupTurn() {
   const runtime = {
     db,
     store,
-    workspaceKey: resolve(workspace).toLowerCase(),
+    workspaceKey: workspaceKey(workspace),
     parentRef: 'refs/turnrewind/t1-after',
     undoing: false,
   }

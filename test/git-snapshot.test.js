@@ -124,7 +124,7 @@ it('allows sequential undo of an interrupted turn after a later turn', async () 
     insertTurn(db, {
       turnId: 'session:A',
       sessionId: 'session',
-      workspaceKey: workspace.toLowerCase(),
+      workspaceKey: workspaceKey(workspace),
       startedAt: '2026-01-01T00:00:00.000Z',
       beforeRef: 'refs/turnrewind/a-before',
     })
@@ -136,7 +136,7 @@ it('allows sequential undo of an interrupted turn after a later turn', async () 
     insertTurn(db, {
       turnId: 'session:B',
       sessionId: 'session',
-      workspaceKey: workspace.toLowerCase(),
+      workspaceKey: workspaceKey(workspace),
       startedAt: '2026-01-01T00:01:00.000Z',
       beforeRef: 'refs/turnrewind/b-before',
     })
@@ -147,14 +147,14 @@ it('allows sequential undo of an interrupted turn after a later turn', async () 
     completeUndoTransaction(db, {
       noticeId: 'notice-b',
       sessionId: 'session',
-      workspaceKey: workspace.toLowerCase(),
+      workspaceKey: workspaceKey(workspace),
       targetTurnId: 'session:B',
       restoredPaths: filesB,
       notRestored: [],
       operationId: 'op-b',
       createdAt: '2026-01-01T00:02:00.000Z',
     })
-    assert.equal(getLatestTurn(db, 'session', workspace.toLowerCase()).turn_id, 'session:A')
+    assert.equal(getLatestTurn(db, 'session', workspaceKey(workspace)).turn_id, 'session:A')
 
     for (const file of await snapshotDiff(store, beforeA.commit, afterA.commit)) await restorePath(store, beforeA.commit, file)
     for (const file of [...filesA, ...filesB]) await assert.rejects(stat(join(workspace, file)))

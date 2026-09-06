@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'pathe'
+import { join } from 'pathe'
 import { it } from 'vitest'
-import { captureSnapshot, createSnapshotStore, currentState, restorePath, stateAt } from '../src/host/service/git-snapshot'
+import { captureSnapshot, createSnapshotStore, currentState, restorePath, stateAt, workspaceKey } from '../src/host/service/git-snapshot'
 import { insertTurn, openLedger, settleTurn } from '../src/host/service/ledger'
 import { applyUndo } from '../src/index'
 import { initGitWorkspace } from './git-test-utils.js'
@@ -184,7 +184,7 @@ it('keeps snapshot symlinks unrestorable and reported by undo', async () => {
     insertTurn(db, {
       turnId: 'session:1',
       sessionId: 'session',
-      workspaceKey: resolve(workspace).toLowerCase(),
+      workspaceKey: workspaceKey(workspace),
       startedAt: '2026-01-01T00:00:00.000Z',
       beforeRef: 'refs/turnrewind/sl-before',
     })
@@ -193,7 +193,7 @@ it('keeps snapshot symlinks unrestorable and reported by undo', async () => {
     const runtime = {
       db,
       store,
-      workspaceKey: resolve(workspace).toLowerCase(),
+      workspaceKey: workspaceKey(workspace),
       parentRef: 'refs/turnrewind/sl-after',
       undoing: false,
     }

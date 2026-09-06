@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'pathe'
+import { join } from 'pathe'
 import { it } from 'vitest'
 import { captureSnapshot, createSnapshotStore, workspaceHash, workspaceKey } from '../src/host/service/git-snapshot'
 import { createOperation, createPendingPlan, getTurn, insertTurn, openLedger, queueRewindNotice, registerWorkspace, settleTurn } from '../src/host/service/ledger'
@@ -12,14 +12,14 @@ import { commitAll, gitOutput, initGitWorkspace } from './git-test-utils.js'
 it('purges ledger rows and the snapshot repository for one workspace', async () => {
   const root = await mkdtemp(join(tmpdir(), 'turnrewind-purge-test-'))
   const workspace = join(root, 'ws')
-  const workspaceKey = resolve(workspace).toLowerCase()
+  const wsKey = workspaceKey(workspace)
   try {
     const db = openLedger(root)
-    registerWorkspace(db, workspaceKey, workspace, join(root, 'snapshots', 'x.git'))
+    registerWorkspace(db, wsKey, workspace, join(root, 'snapshots', 'x.git'))
     insertTurn(db, {
       turnId: 'session:1',
       sessionId: 'session',
-      workspaceKey,
+      workspaceKey: wsKey,
       startedAt: '2026-01-01T00:00:00.000Z',
       beforeRef: 'refs/turnrewind/turn-session-1-before',
     })
@@ -33,7 +33,7 @@ it('purges ledger rows and the snapshot repository for one workspace', async () 
     queueRewindNotice(db, {
       noticeId: 'notice-1',
       sessionId: 'session',
-      workspaceKey,
+      workspaceKey: wsKey,
       targetTurnId: 'session:1',
       paths: ['a.txt'],
       createdAt: '2026-01-01T00:01:00.000Z',

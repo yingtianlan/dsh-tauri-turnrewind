@@ -41,6 +41,10 @@ const dshClientInline = [/^(unstorage|hookable|ofetch|pathe|date-fns)([/-].*)?$/
 const common: UserConfig = {
   outDir: 'dist',
   format: 'esm',
+  // 显式 target：tsdown 0.17.4 对「CJS + target >= 22.12」（engines 推断出
+  // node22.15）按 ERROR 处理并退出 1；client.cjs 必须是 CJS（ModuleLoader
+  // 包装），node22 语法目标对本插件的 Node 22.15+ 环境无实质差异。
+  target: 'node22',
   outExtensions: () => ({ js: '.js' }),
   external: dshExternal,
 }

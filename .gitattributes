@@ -1,0 +1,6 @@
+# Sourcemap sourcesContent embeds source bytes verbatim: a CRLF working tree
+# (Windows) writes \\r\\n escapes into dist/*.map, while CI builds from LF and then
+# fails the "Verify committed dist is up to date" check. Pin LF for sources and
+# built output so every platform produces byte-identical dist.
+src/** text eol=lf
+dist/** text eol=lf

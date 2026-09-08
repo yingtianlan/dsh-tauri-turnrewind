@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import process from "node:process";
-import { dirname, join, relative, resolve, sep } from "pathe";
+import { basename, dirname, join, relative, resolve, sep } from "pathe";
 import { Buffer } from "node:buffer";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
@@ -101,12 +101,28 @@ const REV_PARSE_ARGS = [
 	"--git-path",
 	"info/exclude"
 ];
+/**
+* realpathSync 安全包装：路径不存在时原样返回。macOS 上 /var → /private/var 的
+* symlink 在这里归一。用 `.native` 而非 plain realpathSync 是 Windows 的硬要求：
+* libuv 的 JS-path 实现不会展开 8.3 短名（TEMP=C:\Users\RUNNER~1\... 原样保留），
+* 而 `.native`（GetFinalPathNameByHandle）展开为磁盘上的长名——git 的
+* --show-toplevel 输出的正是长名。若这里不展开，工作区以短名/长名两次调用
+* gitWorkspace → 相对 .git 解析出不同字符串 → ensureRepository 的 gitDir 恒等
+* 检查永远失败（TURNREWIND_GIT_REPOSITORY）。pathe resolve 统一正斜杠。
+*/
+function safeRealpath(p) {
+	try {
+		return resolve(realpathSync.native(p));
+	} catch {
+		return resolve(p);
+	}
+}
 function resolveInfo(requestedDir, stdout) {
 	const lines = stdout.split(/\r?\n/u).filter((line) => line.trim() !== "");
 	if (lines.length < 6 || lines[0] !== "true") return void 0;
-	const workspaceRoot = resolve(requestedDir, lines[1]);
-	const resolvedGitDir = resolve(requestedDir, lines[2]);
-	const resolvedCommonDir = resolve(requestedDir, lines[3]);
+	const workspaceRoot = safeRealpath(resolve(requestedDir, lines[1]));
+	const resolvedGitDir = safeRealpath(resolve(requestedDir, lines[2]));
+	const resolvedCommonDir = safeRealpath(resolve(requestedDir, lines[3]));
 	const resolvedIndex = resolve(requestedDir, lines[4]);
 	const resolvedInfoExclude = resolve(requestedDir, lines[5]);
 	if (!existsSync(workspaceRoot) || !existsSync(resolvedGitDir) || !existsSync(resolvedCommonDir)) return void 0;
@@ -143,7 +159,10 @@ function refreshWorkspaceAsync(requestedDir) {
 			if (settled) return;
 			settled = true;
 			child.kill("SIGKILL");
-			resolvePromise(void 0);
+			resolvePromise({
+				info: void 0,
+				gitMissing: false
+			});
 		}, SYNC_GIT_TIMEOUT_MS);
 		child.stdout.on("data", (chunk) => chunks.push(chunk));
 		child.on("error", (error) => {
@@ -151,19 +170,26 @@ function refreshWorkspaceAsync(requestedDir) {
 			settled = true;
 			clearTimeout(timeout);
 			if (error.code === "ENOENT") gitExecutableMissing = true;
-			resolvePromise(void 0);
+			resolvePromise({
+				info: void 0,
+				gitMissing: error.code === "ENOENT"
+			});
 		});
 		child.on("close", (code) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timeout);
-			resolvePromise(code === 0 ? resolveInfo(requestedDir, Buffer.concat(chunks).toString("utf8")) : void 0);
+			resolvePromise({
+				info: code === 0 ? resolveInfo(requestedDir, Buffer.concat(chunks).toString("utf8")) : void 0,
+				gitMissing: false
+			});
 		});
-	}).then((info) => {
+	}).then((result) => {
 		refreshInflight.delete(requestedDir);
-		workspaceCache.set(requestedDir, {
+		if (!result.gitMissing) workspaceCache.set(requestedDir, {
 			at: Date.now(),
-			info
+			info: result.info,
+			gitMissing: false
 		});
 	}).catch(() => {
 		refreshInflight.delete(requestedDir);
@@ -187,7 +213,8 @@ function gitWorkspace(workspaceDir) {
 	const info = result.ok ? resolveInfo(requestedDir, result.stdout ?? "") : void 0;
 	workspaceCache.set(requestedDir, {
 		at: Date.now(),
-		info
+		info,
+		gitMissing: false
 	});
 	evictOldest();
 	return info;
@@ -461,15 +488,71 @@ function assertSafePath(workspaceDir, path) {
 	}
 	return target;
 }
+/** Windows 路径分隔符（源码里避免裸控制字符，与 guard.ts 同一写法）。 */
+const WINDOWS_PATH_SEPARATOR = String.fromCharCode(92);
+/**
+* Detect whether the volume holding `dir` folds case. macOS APFS is
+* case-insensitive by default but can be formatted case-sensitive; on such
+* volumes `Repo` and `repo` are distinct directories and must not collapse
+* into one workspace key (the ledger/lock/snapshot domain would collide and
+* a purge could delete the other workspace's state). The probe is cached per
+* directory; unresolvable/synthetic paths fall back to the platform default
+* so tests can keep passing without a real filesystem.
+*/
+const caseSensitivityCache = /* @__PURE__ */ new Map();
+function isCaseInsensitiveDir(dir, platform) {
+	const cached = caseSensitivityCache.get(dir);
+	if (cached !== void 0) return cached;
+	let result;
+	try {
+		const base = basename(dir);
+		const parent = dirname(dir);
+		const index = base.search(/[A-Za-z]/u);
+		if (index === -1) result = platform === "darwin";
+		else {
+			const character = base[index];
+			const toggled = character === character.toLowerCase() ? character.toUpperCase() : character.toLowerCase();
+			const variant = join(parent, `${base.slice(0, index)}${toggled}${base.slice(index + 1)}`);
+			const originalStat = lstatSync(dir);
+			if (existsSync(variant)) {
+				const variantStat = lstatSync(variant);
+				result = originalStat.dev === variantStat.dev && originalStat.ino === variantStat.ino;
+			} else result = false;
+		}
+	} catch {
+		result = platform === "darwin";
+	}
+	caseSensitivityCache.set(dir, result);
+	return result;
+}
 /**
 * Canonical workspace identity shared by the ledger key, the snapshot repo
-* hash and maintenance purges: case-folded on case-insensitive platforms
-* (Windows NTFS, macOS APFS default) so one directory cannot spawn two
-* snapshot domains; Linux stays byte-exact. `platform` is injectable for tests.
+* hash, workspace locks and maintenance purges. `resolve()` alone is not an
+* identity: the same directory is reachable under different spellings —
+* macOS /var → /private/var (os.tmpdir lives behind that symlink) and
+* Windows 8.3 short names (CI runners export TEMP as
+* C:\Users\RUNNER~1\... while the on-disk name is runneradmin) — and one
+* workspace must not split into two snapshot domains. realpathSync folds
+* every spelling of an existing path onto its on-disk form, the same
+* canonical spelling gitWorkspace reports for the worktree, so keys written
+* from a raw cwd and keys computed from the probed worktree always agree;
+* case-insensitive platforms (Windows NTFS, macOS APFS default) then fold
+* casing so one directory cannot spawn two snapshot domains, and Linux
+* stays byte-exact. Unresolvable paths (missing or unreadable) keep the
+* resolved spelling so the key stays deterministic instead of throwing; a
+* later call once the directory exists canonicalizes. `platform` remains
+* injectable for tests.
 */
 function workspaceKey(workspaceDir, platform = process.platform) {
 	const normalized = resolve(workspaceDir);
-	return platform === "win32" || platform === "darwin" ? normalized.toLowerCase() : normalized;
+	let canonical = normalized;
+	try {
+		const native = platform === "win32" ? normalized.replaceAll("/", WINDOWS_PATH_SEPARATOR) : normalized;
+		canonical = resolve(realpathSync.native(native));
+	} catch {}
+	if (platform === "win32") return canonical.toLowerCase();
+	if (platform === "darwin") return isCaseInsensitiveDir(canonical, platform) ? canonical.toLowerCase() : canonical;
+	return canonical;
 }
 function workspaceHash(workspaceDir) {
 	return createHash("sha256").update(workspaceKey(workspaceDir)).digest("hex").slice(0, 24);

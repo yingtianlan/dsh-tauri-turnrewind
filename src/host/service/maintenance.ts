@@ -59,6 +59,15 @@ export function purgeWorkspace(rootDir: string, workspaceDir: string): PurgeSumm
           workspaces: Number(workspaces.changes),
         }
       }
+      catch (error) {
+        try {
+          db.exec('ROLLBACK')
+        }
+        catch {
+          // BEGIN IMMEDIATE 失败时没有活动事务，回滚失败不能掩盖原始错误。
+        }
+        throw error
+      }
       finally {
         db.close()
       }

@@ -1,4 +1,4 @@
-import { S as MAX_FILE_BYTES, _ as workspaceHash, c as gitRef, d as restorePath, g as stateAt, h as snapshotFileDiff, i as currentState, l as probeWorkspace, m as snapshotDiff, n as classifyPathChange, t as captureSnapshot, v as workspaceKey, w as PENDING_PLAN_TTL_MS } from "./git-snapshot-DZ_Ahv7d.js";
+import { S as MAX_FILE_BYTES, _ as workspaceHash, c as gitRef, d as restorePath, g as stateAt, h as snapshotFileDiff, i as currentState, l as probeWorkspace, m as snapshotDiff, n as classifyPathChange, t as captureSnapshot, v as workspaceKey, w as PENDING_PLAN_TTL_MS } from "./git-snapshot-zS8H1aWQ.js";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir, hostname } from "node:os";
 import process from "node:process";
@@ -322,7 +322,9 @@ function createPendingPlan(db, plan) {
 		db.exec("COMMIT");
 		return planId;
 	} catch (error) {
-		db.exec("ROLLBACK");
+		try {
+			db.exec("ROLLBACK");
+		} catch {}
 		throw error;
 	}
 }
@@ -459,7 +461,9 @@ function recordSkippedTurn(db, turn, reason) {
       `).run(randomUUID(), turn.sessionId, turn.workspaceKey, reason, (/* @__PURE__ */ new Date()).toISOString());
 		db.exec("COMMIT");
 	} catch (error) {
-		db.exec("ROLLBACK");
+		try {
+			db.exec("ROLLBACK");
+		} catch {}
 		throw error;
 	}
 }
@@ -529,7 +533,9 @@ function completeUndoTransaction(db, completion) {
 		db.exec("COMMIT");
 		return "undone";
 	} catch (error) {
-		db.exec("ROLLBACK");
+		try {
+			db.exec("ROLLBACK");
+		} catch {}
 		db.prepare(`
       UPDATE operations SET outcome = 'needs-recovery', settled_at = ?, error = ?
       WHERE operation_id = ? AND outcome = 'applying'
@@ -568,7 +574,9 @@ function completeRedoTransaction(db, completion) {
 		db.exec("COMMIT");
 		return "settled";
 	} catch (error) {
-		db.exec("ROLLBACK");
+		try {
+			db.exec("ROLLBACK");
+		} catch {}
 		db.prepare(`
       UPDATE operations SET outcome = 'needs-recovery', settled_at = ?, error = ?
       WHERE operation_id = ? AND outcome = 'applying'
@@ -592,7 +600,8 @@ function normalizeDir(path) {
 	const raw = resolve(path);
 	const corrected = process.platform === "win32" && /^\/[a-z]:$/i.test(raw) ? `${raw.slice(1)}/` : raw;
 	try {
-		return realpathSync(process.platform === "win32" ? corrected.replaceAll("/", BACKSLASH) : corrected);
+		const fsPath = process.platform === "win32" ? corrected.replaceAll("/", BACKSLASH) : corrected;
+		return realpathSync.native(fsPath);
 	} catch {
 		return corrected;
 	}
@@ -711,7 +720,7 @@ async function acquireWorkspaceLock(rootDir, workspaceDir, { waitMs = 0 } = {}) 
 	for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt += 1) try {
 		writeLockFile(path, token);
 		if (readLockContent(path)?.token !== token) {
-			rmSync(path, { force: true });
+			releaseLockFile(path, token);
 			continue;
 		}
 		let released = false;
@@ -940,7 +949,7 @@ function indent(text, prefix) {
 }
 async function safeDiffAgainstDisk(store, ref, path) {
 	try {
-		const { diffAgainstDisk } = await import("./git-snapshot-CiNTvlxN.js");
+		const { diffAgainstDisk } = await import("./git-snapshot-DSYOPzQJ.js");
 		return await diffAgainstDisk(store, ref, path);
 	} catch {
 		return "(unable to inspect the on-disk file safely)";
@@ -949,7 +958,7 @@ async function safeDiffAgainstDisk(store, ref, path) {
 /** 冲突检测：不可检视路径（symlink/escape）按冲突处理。 */
 async function diskMatchesSnapshot(runtime, workspaceDir, ref, path) {
 	try {
-		const { currentState: currentState$1 } = await import("./git-snapshot-CiNTvlxN.js");
+		const { currentState: currentState$1 } = await import("./git-snapshot-DSYOPzQJ.js");
 		return classifyUndo(await currentState$1(workspaceDir, path), await stateAt(runtime.store, ref, path)) !== "conflict";
 	} catch {
 		return false;
@@ -1286,19 +1295,27 @@ async function applyUndo(runtime, active, invocation, env = {
 			};
 		}
 	} else if (parsed.turnId) {
+		runtime.undoing = true;
 		target = getTurn(runtime.db, parsed.turnId);
-		if (target && !await turnRefsExist(runtime.store, target)) return {
-			kind: "error",
-			text: `The snapshot data for turn ${parsed.turnId} no longer exists (the snapshot repository was previously wiped); its changes can no longer be undone.`
-		};
-	} else for (const candidate of listReversibleTurns(runtime.db, invocation.agent.session.id, workspaceKey$1)) {
-		if (await turnRefsExist(runtime.store, candidate)) {
-			target = candidate;
-			break;
+		if (target && !await turnRefsExist(runtime.store, target)) {
+			runtime.undoing = false;
+			return {
+				kind: "error",
+				text: `The snapshot data for turn ${parsed.turnId} no longer exists (the snapshot repository was previously wiped); its changes can no longer be undone.`
+			};
 		}
-		markTurnSnapshotMissing(runtime.db, candidate.turn_id);
+	} else {
+		runtime.undoing = true;
+		for (const candidate of listReversibleTurns(runtime.db, invocation.agent.session.id, workspaceKey$1)) {
+			if (await turnRefsExist(runtime.store, candidate)) {
+				target = candidate;
+				break;
+			}
+			markTurnSnapshotMissing(runtime.db, candidate.turn_id);
+		}
 	}
 	if (!target) {
+		runtime.undoing = false;
 		const latest = getLatestTurnSummary(runtime.db, invocation.agent.session.id, workspaceKey$1);
 		return {
 			kind: "error",
@@ -1307,10 +1324,12 @@ async function applyUndo(runtime, active, invocation, env = {
 	}
 	const ownershipError = assertSessionOwner(target, invocation.agent);
 	if (ownershipError) {
+		runtime.undoing = false;
 		abortPendingPlanClaim();
 		return ownershipError;
 	}
 	if (target.workspace_key !== workspaceKey$1) {
+		runtime.undoing = false;
 		abortPendingPlanClaim();
 		return {
 			kind: "error",
@@ -1318,6 +1337,7 @@ async function applyUndo(runtime, active, invocation, env = {
 		};
 	}
 	if (!["settled", "interrupted"].includes(target.status) || target.reversible !== 1 || !target.before_ref || !target.after_ref) {
+		runtime.undoing = false;
 		abortPendingPlanClaim();
 		return {
 			kind: "error",

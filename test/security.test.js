@@ -160,6 +160,7 @@ it('refuses symlinked workspace paths during inspection and restore', async () =
 it('keeps snapshot symlinks unrestorable and reported by undo', async () => {
   const root = await mkdtemp(join(tmpdir(), 'turnrewind-symlink-undo-'))
   const workspace = join(root, 'workspace')
+  let db
   try {
     await initGitWorkspace(workspace)
     await writeFile(join(workspace, 'keep.txt'), 'before\n')
@@ -172,7 +173,7 @@ it('keeps snapshot symlinks unrestorable and reported by undo', async () => {
         return
       throw error
     }
-    const db = openLedger(join(root, 'ledger'))
+    db = openLedger(join(root, 'ledger'))
     const store = createSnapshotStore(join(root, 'data'), workspace)
     await captureSnapshot(store, 'refs/turnrewind/sl-before', 'before')
 
@@ -216,9 +217,9 @@ it('keeps snapshot symlinks unrestorable and reported by undo', async () => {
     assert.match(confirmed.text, /Not restored \(1 file\(s\)\): link/u)
     assert.equal(await readFile(join(workspace, 'link'), 'utf8'), 'now-a-file\n')
     assert.equal(await readFile(join(workspace, 'keep.txt'), 'utf8'), 'before\n')
-    db.close()
   }
   finally {
+    db?.close()
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
   }
 })

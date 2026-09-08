@@ -122,7 +122,9 @@ export async function acquireWorkspaceLock(rootDir: string, workspaceDir: string
       // 并判 stale 接管。获锁后回读自检——token 不在（已被接管/覆盖）即
       // 视为未获锁并重试，绝不形成双持锁。
       if (readLockContent(path)?.token !== token) {
-        rmSync(path, { force: true })
+        // 锁已被其他进程接管：只清理自己名下的锁（token 不匹配时不会删除），
+        // 绝不删除他人的有效锁，否则两个进程会并发写同一 workspace。
+        releaseLockFile(path, token)
         continue
       }
       let released = false

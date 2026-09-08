@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'pathe'
 import { it } from 'vitest'
@@ -125,6 +125,42 @@ it('purges only turnrewind data; the user repository and other workspaces stay i
   }
   finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('purges data registered under a different spelling of the same workspace', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'turnrewind-purge-spelling-'))
+  const workspace = join(root, 'ws')
+  try {
+    await initGitWorkspace(workspace)
+    const db = openLedger(root)
+    registerWorkspace(db, workspaceKey(workspace), workspace, join(root, 'snapshots', 'ws.git'))
+    insertTurn(db, {
+      turnId: 'session:1',
+      sessionId: 'session',
+      workspaceKey: workspaceKey(workspace),
+      startedAt: '2026-01-01T00:00:00.000Z',
+      beforeRef: 'refs/turnrewind/turn-session-1-before',
+    })
+    settleTurn(db, 'session:1', 'refs/turnrewind/turn-session-1-after')
+    db.close()
+
+    const repoDir = join(root, 'snapshots', `${workspaceHash(workspace)}.git`)
+    await mkdir(join(repoDir, 'objects'), { recursive: true })
+    await writeFile(join(repoDir, 'HEAD'), 'ref: refs/heads/main\n')
+
+    // Purge through a link alias of the same directory (junctions need no
+    // elevation on Windows): canonical identity must land on the one
+    // snapshot repo and ledger domain instead of forking a second empty one.
+    const alias = join(root, 'ws-alias')
+    await symlink(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    const summary = purgeWorkspace(root, alias)
+    assert.equal(summary.repoExisted, true)
+    assert.deepEqual(summary.ledger, { operations: 0, notices: 0, plans: 0, turns: 1, workspaces: 1 })
+    assert.equal(existsSync(repoDir), false)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
   }
 })
 

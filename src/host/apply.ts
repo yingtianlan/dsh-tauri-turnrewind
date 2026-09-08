@@ -517,7 +517,7 @@ export function apply(ctx: HostApplyContext): void {
         return [409, { error: 'the host restarted since this preview; run /undo again' }]
       // P1-6：实时围栏——预览后落 needs-recovery 的 workspace 立即拒绝执行。
       if (hasNeedsRecoveryWorkspace(ledger, previewRow.workspace_key))
-        return [409, { error: 'the workspace needs recovery (a previous operation was interrupted) — purge its turnrewind data before retrying' }]
+        return [409, { error: 'TURNREWIND_RECOVERY_REQUIRED: the workspace needs recovery (a previous operation was interrupted) — open the recovery panel to resolve' }]
       if (planRuntime.undoing || workspaceHasActiveTurn(active, previewRow.workspace_key))
         return [409, { error: 'the workspace is busy — wait for the current turn to finish' }]
       const claim = claimPendingPlan(ledger, planId, sessionId)
@@ -773,7 +773,7 @@ export function apply(ctx: HostApplyContext): void {
       }
       const workspaceIdentity = workspaceKeyFor(workspaceDir)
       if (hasNeedsRecoveryWorkspace(ledger, workspaceIdentity))
-        return { kind: 'error', text: 'Undo is unavailable because a previous undo or redo was interrupted. Open the recovery panel (from the "Turn rewind unavailable" notice) to inspect the workspace, keep the history acknowledged, or clear its rewind data.' }
+        return { kind: 'error', text: 'TURNREWIND_RECOVERY_REQUIRED: a previous undo or redo was interrupted. Open the recovery panel (from the "Turn rewind unavailable" notice) to inspect the workspace, keep the history acknowledged, or clear its rewind data.' }
       const issue = workspaceIssue(workspaceDir)
       if (issue)
         return { kind: 'error', text: `Undo is unavailable for this workspace. ${issue}` }

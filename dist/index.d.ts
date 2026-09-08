@@ -147,11 +147,6 @@ interface PlanFormatOptions {
   dryRun?: boolean;
   withDiffs?: boolean;
 }
-interface PlanFormatOptions {
-  preview?: boolean;
-  dryRun?: boolean;
-  withDiffs?: boolean;
-}
 declare function formatPlan(runtime: WorkspaceRuntime, target: TurnRow, entries: PlanEntry[], options: PlanFormatOptions): Promise<string>;
 /** 共享 undo 执行器（命令路径与确认 HTTP 路由共用）。 */
 declare function executeUndoRestore(runtime: WorkspaceRuntime, params: {
@@ -333,9 +328,21 @@ declare function gitAvailable(): Promise<boolean>;
 declare function gitRef(repoDir: string, workspaceDir: string, ref: string): Promise<string | undefined>;
 /**
  * Canonical workspace identity shared by the ledger key, the snapshot repo
- * hash and maintenance purges: case-folded on case-insensitive platforms
- * (Windows NTFS, macOS APFS default) so one directory cannot spawn two
- * snapshot domains; Linux stays byte-exact. `platform` is injectable for tests.
+ * hash, workspace locks and maintenance purges. `resolve()` alone is not an
+ * identity: the same directory is reachable under different spellings —
+ * macOS /var → /private/var (os.tmpdir lives behind that symlink) and
+ * Windows 8.3 short names (CI runners export TEMP as
+ * C:\Users\RUNNER~1\... while the on-disk name is runneradmin) — and one
+ * workspace must not split into two snapshot domains. realpathSync folds
+ * every spelling of an existing path onto its on-disk form, the same
+ * canonical spelling gitWorkspace reports for the worktree, so keys written
+ * from a raw cwd and keys computed from the probed worktree always agree;
+ * case-insensitive platforms (Windows NTFS, macOS APFS default) then fold
+ * casing so one directory cannot spawn two snapshot domains, and Linux
+ * stays byte-exact. Unresolvable paths (missing or unreadable) keep the
+ * resolved spelling so the key stays deterministic instead of throwing; a
+ * later call once the directory exists canonicalizes. `platform` remains
+ * injectable for tests.
  */
 declare function workspaceKey(workspaceDir: string, platform?: string): string;
 declare function workspaceHash(workspaceDir: string): string;

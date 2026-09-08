@@ -500,7 +500,12 @@ export function createPendingPlan(db: Ledger, plan: PendingPlan): string {
     return planId
   }
   catch (error) {
-    db.exec('ROLLBACK')
+    try {
+      db.exec('ROLLBACK')
+    }
+    catch {
+      // BEGIN IMMEDIATE 失败时没有活动事务，回滚失败不能掩盖原始错误。
+    }
     throw error
   }
 }
@@ -645,7 +650,12 @@ export function recordSkippedTurn(db: Ledger, turn: { turnId: string, sessionId:
     db.exec('COMMIT')
   }
   catch (error) {
-    db.exec('ROLLBACK')
+    try {
+      db.exec('ROLLBACK')
+    }
+    catch {
+      // BEGIN IMMEDIATE 失败时没有活动事务，回滚失败不能掩盖原始错误。
+    }
     throw error
   }
 }
@@ -773,7 +783,12 @@ export function completeUndoTransaction(db: Ledger, completion: UndoCompletion):
     return 'undone'
   }
   catch (error) {
-    db.exec('ROLLBACK')
+    try {
+      db.exec('ROLLBACK')
+    }
+    catch {
+      // 回滚失败不掩盖原始错误；needs-recovery 围栏写入仍要执行。
+    }
     // 账本未能完成：operation 落 needs-recovery，启动围栏将拦截该 workspace
     db.prepare(`
       UPDATE operations SET outcome = 'needs-recovery', settled_at = ?, error = ?
@@ -847,7 +862,12 @@ export function completeRedoTransaction(db: Ledger, completion: RedoCompletion):
     return 'settled'
   }
   catch (error) {
-    db.exec('ROLLBACK')
+    try {
+      db.exec('ROLLBACK')
+    }
+    catch {
+      // 回滚失败不掩盖原始错误；needs-recovery 围栏写入仍要执行。
+    }
     // 账本未能完成：redo operation 落 needs-recovery，启动围栏将拦截该 workspace
     db.prepare(`
       UPDATE operations SET outcome = 'needs-recovery', settled_at = ?, error = ?

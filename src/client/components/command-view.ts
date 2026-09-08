@@ -11,6 +11,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { TURNREWIND_CLASS_PREFIX, TURNREWIND_HTTP_BASE, TURNREWIND_POLL_INTERVAL_MS } from '../constants'
 import { LOCALES } from '../locales'
 import { parseUndoOutput, resolvePlanStatus } from '../utils/parse'
+import { openRecoveryPanel } from '../utils/recovery-opener'
 import { resolveOwnerSessionId } from '../utils/session'
 
 // ------------------------------------------------------------------
@@ -153,7 +154,7 @@ export function UndoCommandView(props: CommandViewProps): React.ReactElement {
   const hasDiff = withDiff.length > 0
   // 无文件清单的输出（--doctor 报告、多行错误说明）走纯文本正文：
   // 否则这类卡片只剩第一行摘要，报告主体被整个吞掉。
-  const plainLines = parsed.files.length === 0 ? text.replace(/^[^\n]*\n/u, '').split('\n') : []
+  const plainLines = parsed.files.length === 0 && text.includes('\n') ? text.slice(text.indexOf('\n') + 1).split('\n') : []
   // 静态报告行：永不重排/增删；id 预计算，避免 JSX key 直接引用数组下标。
   const plainRows = plainLines.map((line, index) => ({ id: `${index}:${line}`, line }))
   const summary = parsed.summary || (state === 'error' ? tr('cardFailed') : state === 'running' ? tr('cardRunning') : tr('cardDone'))
@@ -220,6 +221,7 @@ export function UndoCommandView(props: CommandViewProps): React.ReactElement {
         const payload = await res.json().catch(() => ({}) as Record<string, unknown>)
         if (stop)
           return
+        const httpFailure = !res.ok && res.status !== 404
         const next = resolvePlanStatus({ ok: res.ok, status: res.status }, payload as { status?: string, resultText?: string | null })
         if (next.status !== null && next.status !== 'pending')
           setPlanStatus(next.status)
@@ -231,7 +233,9 @@ export function UndoCommandView(props: CommandViewProps): React.ReactElement {
           haltPolling()
           return
         }
-        failures = next.status === 'pending' ? 0 : failures + 1
+        // 非 404 的 HTTP 错误（500/503 等）也计入失败预算，避免无限轮询；
+        // 只有真实 pending 负载才清零失败计数。
+        failures = (!httpFailure && next.status === 'pending') ? 0 : failures + 1
         if (failures >= MAX_POLL_FAILURES)
           haltPolling()
       }
@@ -301,6 +305,11 @@ export function UndoCommandView(props: CommandViewProps): React.ReactElement {
     : tr('cancelAction')
   // plan 提交即置 applying：提示行不等轮询返回就切到等待态。
   const pendingWait = submitting || submitted === 'confirm' || planStatus === 'applying'
+  // P2-11 恢复面板可达性：/undo 错误里命中恢复围栏时，卡片直接给出
+  // 「打开恢复面板」入口——弹窗种子逻辑会让历史提示不再重弹，如果只在
+  // 弹窗里放入口，被围的用户可能永远到不了面板。
+  const underRecovery = (state === 'error' && text.includes('TURNREWIND_RECOVERY_REQUIRED'))
+    || Boolean(submitError?.includes('TURNREWIND_RECOVERY_REQUIRED'))
   const hint = submitError
     ? `${tr('confirmFailed')}${submitError}`
     : resultText || (planStatus === 'applied' || pendingWait
@@ -309,14 +318,16 @@ export function UndoCommandView(props: CommandViewProps): React.ReactElement {
         ? tr('planExpiredHint')
         : planStatus === 'gone'
           ? tr('planGoneHint')
-          : planStatus === 'cancelled' || submitted === 'cancel' ? tr('cancelled') : tr('previewHint'))
+          : planStatus === 'cancelled' || submitted === 'cancel'
+            ? tr('cancelled')
+            : underRecovery ? tr('recoveryHint') : tr('previewHint'))
   // 执行结果（成功/失败）靠左展示；「已提交，等待执行结果」与预览提示一样
   // 贴 footer 右缘——等执行结果落地（resultText/applied）再切到左侧。
   const hintLeft = Boolean(resultText || submitError || planStatus === 'applied')
   const hintCls = `${TURNREWIND_CLASS_PREFIX}-card-hint${submitError
     ? ` ${TURNREWIND_CLASS_PREFIX}-card-hint-error`
     : resultText || planStatus === 'applied' ? ` ${TURNREWIND_CLASS_PREFIX}-card-hint-ok` : ''}${hintLeft ? '' : ` ${TURNREWIND_CLASS_PREFIX}-card-hint-right`}`
-  const showFooter = actionable || submitting || resultText !== null || submitError !== null || submitted !== null || planStatus === 'applied' || planStatus === 'expired' || planStatus === 'cancelled'
+  const showFooter = actionable || submitting || resultText !== null || submitError !== null || submitted !== null || planStatus === 'applied' || planStatus === 'expired' || planStatus === 'cancelled' || underRecovery
 
   // 取消/过期折叠为无边框细行。
   if (collapsed) {
@@ -356,17 +367,25 @@ export function UndoCommandView(props: CommandViewProps): React.ReactElement {
             }, row.line === '' ? '\u00A0' : row.line)))
     : null,
   // 操作 footer：按钮在左；提交后结果贴左，预览提示靠右。
+  // 恢复围栏态（错误输出含 TURNREWIND_RECOVERY_REQUIRED）：footer 只放
+  // 「打开恢复面板」入口，指向宿主注入的恢复面板。
   showFooter
     ? React.createElement('div', {
         className: `${TURNREWIND_CLASS_PREFIX}-card-actions`,
-      }, actionable || submitting
+      }, underRecovery
+        ? React.createElement('button', {
+            type: 'button',
+            onClick: () => { openRecoveryPanel() },
+            className: `${TURNREWIND_CLASS_PREFIX}-card-confirm`,
+          }, tr('recoveryOpen'))
+        : null, (!underRecovery && (actionable || submitting))
         ? React.createElement('button', {
             type: 'button',
             onClick: () => { void submit('confirm') },
             disabled: submitting || submitted !== null,
             className: `${TURNREWIND_CLASS_PREFIX}-card-confirm${submitting ? ` ${TURNREWIND_CLASS_PREFIX}-card-busy` : ''}`,
           }, confirmLabel)
-        : null, actionable || submitting
+        : null, (!underRecovery && (actionable || submitting))
         ? React.createElement('button', {
             type: 'button',
             onClick: () => { void submit('cancel') },

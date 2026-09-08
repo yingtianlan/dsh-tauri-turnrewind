@@ -31,6 +31,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   rmSync,
@@ -39,7 +40,7 @@ import {
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import process from 'node:process'
-import { dirname, join, relative, resolve, sep } from 'pathe'
+import { basename, dirname, join, relative, resolve, sep } from 'pathe'
 import {
   BAK_SUFFIX,
   GIT_PROBE_RETRY_MS,
@@ -345,15 +346,94 @@ function assertSafePath(workspaceDir: string, path: string): string {
   return target
 }
 
+/** Windows 路径分隔符（源码里避免裸控制字符，与 guard.ts 同一写法）。 */
+const WINDOWS_PATH_SEPARATOR = String.fromCharCode(92)
+
+/**
+ * Detect whether the volume holding `dir` folds case. macOS APFS is
+ * case-insensitive by default but can be formatted case-sensitive; on such
+ * volumes `Repo` and `repo` are distinct directories and must not collapse
+ * into one workspace key (the ledger/lock/snapshot domain would collide and
+ * a purge could delete the other workspace's state). The probe is cached per
+ * directory; unresolvable/synthetic paths fall back to the platform default
+ * so tests can keep passing without a real filesystem.
+ */
+const caseSensitivityCache = new Map<string, boolean>()
+
+function isCaseInsensitiveDir(dir: string, platform: string): boolean {
+  const cached = caseSensitivityCache.get(dir)
+  if (cached !== undefined)
+    return cached
+  let result: boolean
+  try {
+    const base = basename(dir)
+    const parent = dirname(dir)
+    const index = base.search(/[A-Za-z]/u)
+    if (index === -1) {
+      result = platform === 'darwin'
+    }
+    else {
+      const character = base[index]!
+      const toggled = character === character.toLowerCase() ? character.toUpperCase() : character.toLowerCase()
+      const variant = join(parent, `${base.slice(0, index)}${toggled}${base.slice(index + 1)}`)
+      const originalStat = lstatSync(dir)
+      if (existsSync(variant)) {
+        const variantStat = lstatSync(variant)
+        result = originalStat.dev === variantStat.dev && originalStat.ino === variantStat.ino
+      }
+      else {
+        result = false
+      }
+    }
+  }
+  catch {
+    result = platform === 'darwin'
+  }
+  caseSensitivityCache.set(dir, result)
+  return result
+}
+
 /**
  * Canonical workspace identity shared by the ledger key, the snapshot repo
- * hash and maintenance purges: case-folded on case-insensitive platforms
- * (Windows NTFS, macOS APFS default) so one directory cannot spawn two
- * snapshot domains; Linux stays byte-exact. `platform` is injectable for tests.
+ * hash, workspace locks and maintenance purges. `resolve()` alone is not an
+ * identity: the same directory is reachable under different spellings —
+ * macOS /var → /private/var (os.tmpdir lives behind that symlink) and
+ * Windows 8.3 short names (CI runners export TEMP as
+ * C:\Users\RUNNER~1\... while the on-disk name is runneradmin) — and one
+ * workspace must not split into two snapshot domains. realpathSync folds
+ * every spelling of an existing path onto its on-disk form, the same
+ * canonical spelling gitWorkspace reports for the worktree, so keys written
+ * from a raw cwd and keys computed from the probed worktree always agree;
+ * case-insensitive platforms (Windows NTFS, macOS APFS default) then fold
+ * casing so one directory cannot spawn two snapshot domains, and Linux
+ * stays byte-exact. Unresolvable paths (missing or unreadable) keep the
+ * resolved spelling so the key stays deterministic instead of throwing; a
+ * later call once the directory exists canonicalizes. `platform` remains
+ * injectable for tests.
  */
 export function workspaceKey(workspaceDir: string, platform: string = process.platform): string {
   const normalized = resolve(workspaceDir)
-  return platform === 'win32' || platform === 'darwin' ? normalized.toLowerCase() : normalized
+  // realpathSync.native wants native separators: pathe emits forward slashes
+  // (and can mangle bare drive roots), so rebuild the Windows form first.
+  // `.native` (not plain realpathSync) is load-bearing on Windows: libuv's
+  // JS-path realpath keeps 8.3 short names as-is (TEMP=C:\Users\RUNNER~1\...)
+  // while `realpathSync.native` (GetFinalPathNameByHandle) expands them to
+  // the on-disk long name — verified against a short-spelled git worktree
+  // where the two spellings must fold onto ONE key or every look-up splits.
+  let canonical = normalized
+  try {
+    const native = platform === 'win32' ? normalized.replaceAll('/', WINDOWS_PATH_SEPARATOR) : normalized
+    canonical = resolve(realpathSync.native(native))
+  }
+  catch {
+    // Missing or unreadable path: the resolved spelling is the best
+    // available key and stays stable across calls.
+  }
+  if (platform === 'win32')
+    return canonical.toLowerCase()
+  if (platform === 'darwin')
+    return isCaseInsensitiveDir(canonical, platform) ? canonical.toLowerCase() : canonical
+  return canonical
 }
 
 export function workspaceHash(workspaceDir: string): string {

@@ -1,5 +1,5 @@
-import { C as MAX_ROUTE_BODY_BYTES, E as SYNC_GIT_TIMEOUT_MS, T as SNAPSHOT_REF_PREFIX, _ as workspaceHash, b as gitWorkspace, c as gitRef, d as restorePath, f as runGit, g as stateAt, h as snapshotFileDiff, i as currentState, l as probeWorkspace, m as snapshotDiff, o as gitAvailable, p as runGitText, r as createSnapshotStore, s as gitExitIsClean, t as captureSnapshot, u as restoreCrashedSwaps, v as workspaceKey, x as MAX_ENDED_TURNS, y as gitUnavailableReason } from "./git-snapshot-DZ_Ahv7d.js";
-import { A as hasNeedsRecoveryWorkspace, B as registerWorkspace, C as claimRewindNotices, D as getPendingPlanRow, E as getLatestTurnSummary, F as markPendingPlanCancelled, G as skipTurn, H as settleInterruptedTurn, I as openLedger, L as pruneConsumedNotices, M as insertTurn, N as listRecoveryWorkspaces, O as getPendingPlanStatus, P as markPendingPlanApplied, R as queueSensitiveNotice, S as claimPendingPlan, T as getLatestSnapshotRef, U as settleNoopTurn, V as releasePendingPlanClaim, W as settleTurn, _ as withWorkspaceLock, a as executeUndoRestore, b as isSystemSensitiveWorkspace, c as turnRefsExist, d as workspaceHasActiveTurn, f as workspaceIssue, g as acquireWorkspaceLockSync, h as acquireWorkspaceLock, j as hasSensitiveNotice, k as getTurn, l as workspaceForAgent, m as WorkspaceLockBusyError, o as formatPlan, p as workspaceKeyFor, r as buildPlanEntries, s as parseUndoInput, t as applyUndo, u as workspaceForSession, v as classifyUndo, w as failTurn, x as acknowledgeRecovery, y as planDrift, z as recordSkippedTurn } from "./undo-B3P3MG95.js";
+import { C as MAX_ROUTE_BODY_BYTES, E as SYNC_GIT_TIMEOUT_MS, T as SNAPSHOT_REF_PREFIX, _ as workspaceHash, b as gitWorkspace, c as gitRef, d as restorePath, f as runGit, g as stateAt, h as snapshotFileDiff, i as currentState, l as probeWorkspace, m as snapshotDiff, o as gitAvailable, p as runGitText, r as createSnapshotStore, s as gitExitIsClean, t as captureSnapshot, u as restoreCrashedSwaps, v as workspaceKey, x as MAX_ENDED_TURNS, y as gitUnavailableReason } from "./git-snapshot-zS8H1aWQ.js";
+import { A as hasNeedsRecoveryWorkspace, B as registerWorkspace, C as claimRewindNotices, D as getPendingPlanRow, E as getLatestTurnSummary, F as markPendingPlanCancelled, G as skipTurn, H as settleInterruptedTurn, I as openLedger, L as pruneConsumedNotices, M as insertTurn, N as listRecoveryWorkspaces, O as getPendingPlanStatus, P as markPendingPlanApplied, R as queueSensitiveNotice, S as claimPendingPlan, T as getLatestSnapshotRef, U as settleNoopTurn, V as releasePendingPlanClaim, W as settleTurn, _ as withWorkspaceLock, a as executeUndoRestore, b as isSystemSensitiveWorkspace, c as turnRefsExist, d as workspaceHasActiveTurn, f as workspaceIssue, g as acquireWorkspaceLockSync, h as acquireWorkspaceLock, j as hasSensitiveNotice, k as getTurn, l as workspaceForAgent, m as WorkspaceLockBusyError, o as formatPlan, p as workspaceKeyFor, r as buildPlanEntries, s as parseUndoInput, t as applyUndo, u as workspaceForSession, v as classifyUndo, w as failTurn, x as acknowledgeRecovery, y as planDrift, z as recordSkippedTurn } from "./undo-CHy9PgvN.js";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import process from "node:process";
@@ -76,8 +76,8 @@ function jsonRoute(path, handler, { mutate = false, methods = [], timeoutMs = 12
 			let tooLarge = false;
 			req.on("data", (chunk) => {
 				if (tooLarge) return;
-				const value = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-				totalBytes += Buffer.byteLength(value, "utf8");
+				const value = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+				totalBytes += value.length;
 				if (totalBytes > MAX_ROUTE_BODY_BYTES) {
 					tooLarge = true;
 					finish();
@@ -102,7 +102,7 @@ function jsonRoute(path, handler, { mutate = false, methods = [], timeoutMs = 12
 						if (!type || !type.toLowerCase().includes("application/json")) return send(415, { error: "content-type must be application/json" });
 					}
 					try {
-						const [code, payload] = await handler(JSON.parse(parts.join("") || "{}"), req);
+						const [code, payload] = await handler(JSON.parse(Buffer.concat(parts).toString("utf8") || "{}"), req);
 						finish();
 						send(code, payload);
 					} catch (error) {
@@ -296,6 +296,11 @@ function purgeWorkspace(rootDir$1, workspaceDir) {
 					turns: Number(turns.changes),
 					workspaces: Number(workspaces.changes)
 				};
+			} catch (error) {
+				try {
+					db.exec("ROLLBACK");
+				} catch {}
+				throw error;
 			} finally {
 				db.close();
 			}
@@ -400,12 +405,22 @@ function enforceRetention(db, store, options = {}) {
 			recursive: true,
 			force: true
 		});
+		const affected = db.prepare(`
+      SELECT turn_id FROM turns
+      WHERE workspace_key = ? AND reversible = 1 AND status IN ('settled', 'interrupted')
+    `).all(workspaceIdentity);
 		db.prepare(`
       UPDATE turns SET reversible = 0,
         error = 'retention: snapshot repository rebuilt (size cap)'
       WHERE workspace_key = ? AND reversible = 1 AND status IN ('settled', 'interrupted')
     `).run(workspaceIdentity);
-		renameSync(store.repoDir, quarantine);
+		try {
+			renameSync(store.repoDir, quarantine);
+		} catch (error) {
+			const revert = db.prepare(`UPDATE turns SET reversible = 1, error = NULL WHERE turn_id = ?`);
+			for (const row of affected) revert.run(row.turn_id);
+			throw error;
+		}
 		try {
 			rmSync(quarantine, {
 				recursive: true,
@@ -848,7 +863,7 @@ function apply(ctx) {
 			if (previewRow.status !== "pending") return [409, { error: "this plan was already applied or cancelled — run /undo again" }];
 			const planRuntime = workspaceStores.get(previewRow.workspace_key);
 			if (planRuntime === void 0) return [409, { error: "the host restarted since this preview; run /undo again" }];
-			if (hasNeedsRecoveryWorkspace(ledger, previewRow.workspace_key)) return [409, { error: "the workspace needs recovery (a previous operation was interrupted) — purge its turnrewind data before retrying" }];
+			if (hasNeedsRecoveryWorkspace(ledger, previewRow.workspace_key)) return [409, { error: "TURNREWIND_RECOVERY_REQUIRED: the workspace needs recovery (a previous operation was interrupted) — open the recovery panel to resolve" }];
 			if (planRuntime.undoing || workspaceHasActiveTurn(active, previewRow.workspace_key)) return [409, { error: "the workspace is busy — wait for the current turn to finish" }];
 			const claim = claimPendingPlan(ledger, planId, sessionId);
 			if (!claim.ok) return [claim.code, { error: claim.error }];
@@ -975,7 +990,7 @@ function apply(ctx) {
 		if (!workspaceDir) return decision;
 		const notices = claimRewindNotices(ledger, agent.session.id, workspaceKeyFor(workspaceDir));
 		if (notices.length === 0) return decision;
-		const { createNoticeMessage } = await import("./undo-C-cf5yh4.js");
+		const { createNoticeMessage } = await import("./undo-BH8Zwv4C.js");
 		return {
 			...decision,
 			messages: [...decision.messages ?? [], ...notices.map((notice) => createNoticeMessage(notice))]
@@ -1044,7 +1059,7 @@ function apply(ctx) {
 			}
 			if (hasNeedsRecoveryWorkspace(ledger, workspaceKeyFor(workspaceDir))) return {
 				kind: "error",
-				text: "Undo is unavailable because a previous undo or redo was interrupted. Open the recovery panel (from the \"Turn rewind unavailable\" notice) to inspect the workspace, keep the history acknowledged, or clear its rewind data."
+				text: "TURNREWIND_RECOVERY_REQUIRED: a previous undo or redo was interrupted. Open the recovery panel (from the \"Turn rewind unavailable\" notice) to inspect the workspace, keep the history acknowledged, or clear its rewind data."
 			};
 			const issue = workspaceIssue(workspaceDir);
 			if (issue) return {

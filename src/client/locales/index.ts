@@ -23,6 +23,7 @@ export type LocaleKey
     | 'planExpiredHint'
     | 'planGoneHint'
     | 'previewHint'
+    | 'recoveryHint'
     | 'sessionMissing'
     | 'recoveryTitle'
     | 'recoveryIntro'
@@ -54,6 +55,7 @@ const DICT_ZH: Record<LocaleKey, string> = {
   planExpiredHint: '该计划已过期，重新执行 /undo 可生成新预览',
   planGoneHint: '该计划不存在（可能已被清理或来自旧版本数据）',
   previewHint: '执行将恢复下方文件到本轮改动前',
+  recoveryHint: '执行将恢复被打断的文件到本轮改动前',
   sessionMissing: '无法确定该卡片所属的会话，请刷新页面后重试',
   recoveryTitle: 'Turn 撤销恢复',
   recoveryIntro: '以下工作区有被中断的撤销操作，文件状态未知，已暂停新的撤销。请先自行检查工作区文件，然后选择保留历史解锁，或清除该工作区的 rewind 数据。',
@@ -86,6 +88,7 @@ const DICT_EN: Record<LocaleKey, string> = {
   planExpiredHint: 'This plan has expired; run /undo again for a fresh preview',
   planGoneHint: 'This plan no longer exists (it may have been purged or comes from older data)',
   previewHint: 'Applying restores the files below to their state before this turn',
+  recoveryHint: 'Applying restores the interrupted files to their state before this turn',
   sessionMissing: 'Cannot determine the session this card belongs to; refresh the page and try again',
   recoveryTitle: 'Turn Rewind Recovery',
   recoveryIntro: 'These workspaces had an interrupted undo; the file state is unknown and new rewind work is paused. Inspect the workspace files yourself, then either keep the history acknowledged or clear the workspace\'s rewind data.',

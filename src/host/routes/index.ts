@@ -88,14 +88,14 @@ export function jsonRoute(path: string, handler: RouteHandler, { mutate = false,
         send(405, { error: 'method not allowed' })
         return
       }
-      const parts: string[] = []
+      const parts: Buffer[] = []
       let totalBytes = 0
       let tooLarge = false
       req.on('data', (chunk: Buffer | string) => {
         if (tooLarge)
           return
-        const value = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-        totalBytes += Buffer.byteLength(value, 'utf8')
+        const value = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
+        totalBytes += value.length
         if (totalBytes > MAX_ROUTE_BODY_BYTES) {
           tooLarge = true
           // P1-3: 超限立即响应并断开，不再消费剩余流。
@@ -126,7 +126,7 @@ export function jsonRoute(path: string, handler: RouteHandler, { mutate = false,
               return send(415, { error: 'content-type must be application/json' })
           }
           try {
-            const parsed = JSON.parse(parts.join('') || '{}') as Record<string, unknown>
+            const parsed = JSON.parse(Buffer.concat(parts).toString('utf8') || '{}') as Record<string, unknown>
             const [code, payload] = await handler(parsed, req)
             finish()
             send(code, payload)

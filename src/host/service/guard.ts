@@ -21,11 +21,13 @@ function normalizeDir(path: string): string {
     ? `${raw.slice(1)}/`
     : raw
   try {
-    // realpathSync 需要平台分隔符（盘根 'C:' 会拼错路径）。
+    // realpathSync.native 与 git-workspace/workspaceKey 同一归一化口径：
+    // 展开 macOS /var → /private/var 与 Windows 8.3 短名（plain realpathSync
+    // 不会展开短名），保证系统目录判定不接受「换个拼写绕过」的路径。
     const fsPath = process.platform === 'win32'
       ? corrected.replaceAll('/', BACKSLASH)
       : corrected
-    return realpathSync(fsPath)
+    return realpathSync.native(fsPath)
   }
   catch {
     // Missing or unreadable paths still need a deterministic comparison key.

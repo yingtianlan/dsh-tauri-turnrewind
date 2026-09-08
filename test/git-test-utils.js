@@ -1,6 +1,19 @@
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
+import { resolve } from 'pathe'
+
+/**
+ * macOS 上 /var → /private/var 的 symlink 导致 mkdtemp 返回的路径与
+ * git --show-toplevel 返回的路径不同；Windows CI 上 TEMP 还可能是 8.3 短名
+ * （C:\Users\RUNNER~1\...）而 git 返回磁盘长名。测试比较路径时统一走
+ * realpathSync.native + pathe resolve 归一化——`.native` 会把 8.3 短名展开为
+ * 长名（plain realpathSync 不会），与生产侧 safeRealpath/workspaceKey 一致。
+ */
+export function resolvedRealPath(p) {
+  return resolve(realpathSync.native(p))
+}
 
 export function runGit(cwd, args) {
   return new Promise((resolvePromise, rejectPromise) => {

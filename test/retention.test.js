@@ -11,8 +11,16 @@ import { enforceRetention } from '../src/host/service/retention'
 import { gitOutput, initGitWorkspace } from './git-test-utils.js'
 
 const cleanups = []
+// Ledgers must close before the temp roots are removed: an open SQLite handle
+// on Windows makes rm fail with EBUSY, which then masks the real failure.
+// (CI observed exactly this: the prunes-unreachable test failed with EBUSY on
+// the retry path instead of reporting its own assertion.)
+const openDbs = []
 
 afterEach(async () => {
+  for (const db of openDbs.reverse())
+    db.close()
+  openDbs.length = 0
   for (const dispose of cleanups.reverse())
     await dispose()
   cleanups.length = 0
@@ -24,6 +32,12 @@ async function makeRoot() {
   const root = await mkdtemp(join(tmpdir(), 'turnrewind-retention-'))
   cleanups.push(async () => rm(root, { recursive: true, force: true }))
   return root
+}
+
+function openLedgerTracked(ledgerRoot) {
+  const db = openLedger(ledgerRoot)
+  openDbs.push(db)
+  return db
 }
 
 async function makeWorkspace(root, name) {
@@ -44,9 +58,9 @@ function seedTurns(db, workspaceKey, count, offset = 0) {
 it('expires turns beyond the retention count, keeping the most recent', async () => {
   const root = await makeRoot()
   const workspace = await makeWorkspace(root, 'ws')
-  const db = openLedger(join(root, 'ledger'))
+  const db = openLedgerTracked(join(root, 'ledger'))
   const store = createSnapshotStore(join(root, 'data'), workspace)
-  seedTurns(db, workspaceKey(workspace), 5)
+  seedTurns(db, workspaceKey(store.workspaceDir), 5)
   process.env.TURNREWIND_RETAIN_TURNS = '3'
 
   const result = enforceRetention(db, store, { maxSnapshotMb: 1024 })
@@ -62,15 +76,14 @@ it('expires turns beyond the retention count, keeping the most recent', async ()
     SELECT error FROM turns WHERE reversible = 0 AND turn_id LIKE 'session:%'
   `).all().map(row => row.error)
   assert.ok(archived.every(error => /retention:/u.test(error)))
-  db.close()
 })
 
 it('rebuilds the snapshot repository when it exceeds the size cap', async () => {
   const root = await makeRoot()
   const workspace = await makeWorkspace(root, 'ws')
-  const db = openLedger(join(root, 'ledger'))
+  const db = openLedgerTracked(join(root, 'ledger'))
   const store = createSnapshotStore(join(root, 'data'), workspace)
-  seedTurns(db, workspaceKey(workspace), 2)
+  seedTurns(db, workspaceKey(store.workspaceDir), 2)
   // Simulate a bloated snapshot repo (the size walk reads the real directory).
   await mkdir(join(store.repoDir, 'objects'), { recursive: true })
   await writeFile(join(store.repoDir, 'objects', 'blob'), Buffer.alloc(2 * 1024 * 1024, 1))
@@ -98,15 +111,14 @@ it('rebuilds the snapshot repository when it exceeds the size cap', async () => 
   // Two-phase rebuild: no half-deleted live directory or quarantine leftover.
   assert.equal(existsSync(store.repoDir), false)
   assert.equal(existsSync(`${store.repoDir}.retention-quarantine`), false)
-  db.close()
 })
 
 it('keeps everything when under both limits', async () => {
   const root = await makeRoot()
   const workspace = await makeWorkspace(root, 'ws')
-  const db = openLedger(join(root, 'ledger'))
+  const db = openLedgerTracked(join(root, 'ledger'))
   const store = createSnapshotStore(join(root, 'data'), workspace)
-  seedTurns(db, workspaceKey(workspace), 3)
+  seedTurns(db, workspaceKey(store.workspaceDir), 3)
   process.env.TURNREWIND_RETAIN_TURNS = '10'
   process.env.TURNREWIND_MAX_SNAPSHOT_MB = '1024'
 
@@ -114,13 +126,12 @@ it('keeps everything when under both limits', async () => {
   assert.equal(result.expiredByCount, 0)
   assert.equal(result.rebuilt, false)
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM turns WHERE reversible = 1').get().count, 3)
-  db.close()
 })
 
 it('prunes unreachable loose objects before measuring the size cap', async () => {
   const root = await makeRoot()
   const workspace = await makeWorkspace(root, 'ws')
-  const db = openLedger(join(root, 'ledger'))
+  const db = openLedgerTracked(join(root, 'ledger'))
   const store = createSnapshotStore(join(root, 'data'), workspace)
   // A real capture first: the private repository must exist (and the reachable
   // objects it holds must survive the prune).
@@ -138,5 +149,4 @@ it('prunes unreachable loose objects before measuring the size cap', async () =>
   assert.equal(existsSync(loosePath), false, 'unreachable loose object must be pruned')
   // The reachable snapshot chain is untouched by the prune.
   assert.equal((await gitOutput(workspace, ['--git-dir', store.repoDir, 'cat-file', '-t', seed.commit])).trim(), 'commit')
-  db.close()
 })

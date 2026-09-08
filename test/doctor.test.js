@@ -19,16 +19,25 @@ it('parses --doctor as a standalone flag', () => {
 it('collects a full read-only doctor report for an eligible workspace', async () => {
   const root = await mkdtemp(join(tmpdir(), 'turnrewind-doctor-'))
   const workspace = join(root, 'workspace')
+  let db
   try {
     await initGitWorkspace(workspace)
     await writeFile(join(workspace, 'a.txt'), 'one')
     await commitAll(workspace, 'initial')
     const dataRoot = join(root, 'data')
-    const db = openLedger(dataRoot)
+    // Close before the temp root is removed even when an assertion fails:
+    // an open SQLite handle makes Windows rm fail with EBUSY and masks the
+    // real failure (observed on CI).
+    db = openLedger(dataRoot)
     const store = createSnapshotStore(dataRoot, workspace)
     const before = await captureSnapshot(store, 'refs/turnrewind/doctor-before', 'before')
     await writeFile(join(workspace, 'a.txt'), 'two')
-    await captureSnapshot(store, 'refs/turnrewind/doctor-after', 'after', before.commit)
+    await captureSnapshot(store, 'refs/turnrewind/doctor-after', 'after', 'refs/turnrewind/doctor-before')
+    // The ledger rows are written from the caller's raw spelling while the
+    // doctor resolves the key through the canonical probe result. CI temp
+    // dirs make the two spellings differ (macOS /var vs /private/var,
+    // Windows 8.3 RUNNER~1); workspaceKey must canonicalize both onto one
+    // identity or the "latest turn" section below reports none recorded.
     registerWorkspace(db, workspaceKey(workspace), workspace, store.repoDir)
     insertTurn(db, {
       turnId: 'session:1',
@@ -55,9 +64,9 @@ it('collects a full read-only doctor report for an eligible workspace', async ()
     const fencedReport = await collectDoctorReport(db, dataRoot, { session: { id: 'session', header: { cwd: workspace } } })
     assert.match(fencedReport, /- recovery fence: 1 workspace\(s\) BLOCKED/u)
     assert.match(fencedReport, /undo → session:1/u)
-    db.close()
   }
   finally {
+    db?.close()
     await rm(root, { recursive: true, force: true })
   }
 })

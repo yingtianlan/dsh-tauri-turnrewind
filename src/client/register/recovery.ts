@@ -67,6 +67,7 @@ function ensureRecoveryDialog(): RecoveryElements {
 
   function hide(): void {
     backdrop.dataset.visible = 'false'
+    a11y?.restoreFocus()
   }
   closeButton.addEventListener('click', hide)
   backdrop.addEventListener('click', (event) => {
@@ -142,14 +143,25 @@ function renderWorkspaces(t: Translate, container: HTMLDivElement, workspaces: R
     const actions = document.createElement('div')
     actions.className = `${TURNREWIND_CLASS_PREFIX}-recovery-actions`
     const run = (mode: 'acknowledge' | 'purge'): void => {
-      for (const button of [...actions.querySelectorAll('button')])
-        (button as HTMLButtonElement).disabled = true
-      void resolveWorkspace(workspace.workspace_key, mode).then((failure) => {
-        if (failure)
-          showActionError(t, failure)
-        else
-          void load(t, container)
-      })
+      const buttons = [...actions.querySelectorAll('button')] as HTMLButtonElement[]
+      const setDisabled = (value: boolean): void => {
+        for (const button of buttons)
+          button.disabled = value
+      }
+      setDisabled(true)
+      void resolveWorkspace(workspace.workspace_key, mode)
+        .then((failure) => {
+          if (failure) {
+            showActionError(t, failure)
+            setDisabled(false)
+            return
+          }
+          return load(t, container)
+        })
+        .catch((error: unknown) => {
+          showActionError(t, String((error as Error)?.message ?? error))
+          setDisabled(false)
+        })
     }
     actions.appendChild(actionButton(t('recoveryAcknowledge'), '', () => run('acknowledge')))
     actions.appendChild(actionButton(t('recoveryPurge'), ` ${TURNREWIND_CLASS_PREFIX}-recovery-btn-danger`, () => run('purge')))
@@ -168,6 +180,10 @@ function showActionError(t: Translate, message: string): void {
 async function load(t: Translate, container: HTMLDivElement): Promise<void> {
   const res = await fetch(`${TURNREWIND_HTTP_BASE}/recovery`)
   const payload = await res.json().catch(() => ({}) as Record<string, unknown>)
+  if (!res.ok) {
+    showActionError(t, (payload as { error?: string }).error ?? `HTTP ${res.status}`)
+    return
+  }
   const workspaces = Array.isArray((payload as { workspaces?: unknown }).workspaces)
     ? (payload as { workspaces: RecoveryWorkspaceInfo[] }).workspaces
     : []

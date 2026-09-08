@@ -59,6 +59,7 @@ it('reports oversized blobs instead of failing the whole preview', async () => {
 it('undoes the other files while reporting the oversized one as not restored', async () => {
   const root = await mkdtemp(join(tmpdir(), 'turnrewind-oversize-undo-'))
   const workspace = join(root, 'workspace')
+  let db
   try {
     await initGitWorkspace(workspace)
     await writeFile(join(workspace, 'small.txt'), 'before\n')
@@ -66,7 +67,7 @@ it('undoes the other files while reporting the oversized one as not restored', a
     big.write('payload at the end', OVER_LIMIT_BYTES - 20)
     await writeFile(join(workspace, 'big.bin'), big)
 
-    const db = openLedger(join(root, 'ledger'))
+    db = openLedger(join(root, 'ledger'))
     const store = createSnapshotStore(join(root, 'data'), workspace)
     await captureSnapshot(store, 'refs/turnrewind/o1-before', 'before')
 
@@ -112,9 +113,9 @@ it('undoes the other files while reporting the oversized one as not restored', a
     // The turn is settled as undone and the ledger's operation completed.
     const row = db.prepare('SELECT status FROM turns WHERE turn_id = ?').get('session:1')
     assert.equal(row.status, 'undone')
-    db.close()
   }
   finally {
+    db?.close()
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
   }
 })

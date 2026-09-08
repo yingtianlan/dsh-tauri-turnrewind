@@ -13,7 +13,9 @@ export interface ModalA11yBinding {
   onKeydown: (event: KeyboardEvent) => void
   /** 弹窗显示时调用：记住先前焦点并聚焦卡内首个可交互元素。 */
   takeFocus: () => void
-  /** 永久释放（插件 dispose）：移除 listener 并尝试还原先前焦点。 */
+  /** 弹窗关闭时调用：把焦点还给打开弹窗前的元素。 */
+  restoreFocus: () => void
+  /** 永久释放（插件 dispose）：移除 listener，不再移动焦点。 */
   release: () => void
 }
 
@@ -64,9 +66,14 @@ export function bindModalA11y(getCard: () => HTMLElement | null, isVisible: () =
       const target = card?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? card
       target?.focus()
     },
+    restoreFocus() {
+      previous?.focus()
+      previous = null
+    },
     release() {
       document.removeEventListener('keydown', onKeydown)
-      previous?.focus()
+      // 关闭路径应调用 restoreFocus()；release 只负责 teardown，不把焦点
+      // 挪到可能已移除的卡片上。
       previous = null
     },
   }

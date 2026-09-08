@@ -146,12 +146,26 @@ export function enforceRetention(db: Ledger, store: SnapshotStore, options: Rete
     // workspace 锁串行化，残留只可能来自上一轮崩溃。
     const quarantine = `${store.repoDir}.retention-quarantine`
     rmSync(quarantine, { recursive: true, force: true })
+    // 先记录本次容量重建将标记过期的行：rename 失败时必须回滚账本，
+    // 避免快照仓库还在但所有 turn 已不可撤销（Windows 打开句柄/杀软锁是现实场景）。
+    const affected = db.prepare(`
+      SELECT turn_id FROM turns
+      WHERE workspace_key = ? AND reversible = 1 AND status IN ('settled', 'interrupted')
+    `).all(workspaceIdentity) as { turn_id: string }[]
     db.prepare(`
       UPDATE turns SET reversible = 0,
         error = 'retention: snapshot repository rebuilt (size cap)'
       WHERE workspace_key = ? AND reversible = 1 AND status IN ('settled', 'interrupted')
     `).run(workspaceIdentity)
-    renameSync(store.repoDir, quarantine)
+    try {
+      renameSync(store.repoDir, quarantine)
+    }
+    catch (error) {
+      const revert = db.prepare(`UPDATE turns SET reversible = 1, error = NULL WHERE turn_id = ?`)
+      for (const row of affected)
+        revert.run(row.turn_id)
+      throw error
+    }
     try {
       rmSync(quarantine, { recursive: true, force: true })
     }

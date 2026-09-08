@@ -13,11 +13,12 @@ import { setCardTranslator, setSubmitLine } from './components/command-view'
 import { TURNREWIND_HTTP_BASE, TURNREWIND_LOCALE_NS, TURNREWIND_POLL_INTERVAL_MS, TURNREWIND_POLL_STOP_MS } from './constants'
 import { LOCALES } from './locales'
 import { registerCommandView } from './register/command-view'
-import { disposeDialog, listNotices, setRecoveryOpener, showDialog } from './register/dialog'
+import { disposeDialog, listNotices, showDialog } from './register/dialog'
 import { disposeRecoveryDialog, openRecoveryDialog } from './register/recovery'
 import { mountCommandViewStyles, mountDialogStyles, mountRecoveryStyles } from './styles'
 import { createHeadsUpTracker, resolveSessionsService } from './utils/heads-up'
 import { parseUndoOutput, resolvePlanStatus } from './utils/parse'
+import { setRecoveryOpener } from './utils/recovery-opener'
 import { resolveOwnerSessionId } from './utils/session'
 
 export { TURNREWIND_API_PREFIX } from '../shared/constants'
@@ -53,7 +54,9 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => setRecoveryOpener(() => openRecoveryDialog(t)), 'turnrewind recovery opener')
 
   // ————————————————— 命令卡片 slot 注册 —————————————————
-  ctx.effect(() => registerCommandView(ctx), 'turnrewind command view')
+  // ctx 的类型是 ClientContext（结构上满足 SlotHost 但类型系统可能看不到
+  // slots 属性——cordis 版本差异），运行时 guarantee slots 存在。
+  ctx.effect(() => registerCommandView(ctx as unknown as Parameters<typeof registerCommandView>[0]), 'turnrewind command view')
 
   // ————————————————— locale 安装 —————————————————
   ctx.effect(() => {

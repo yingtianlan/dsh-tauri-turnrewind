@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'pathe'
+import { join } from 'pathe'
 import { it } from 'vitest'
 import { captureSnapshot, createSnapshotStore, gitRef, restorePath, stateAt } from '../src/host/service/git-snapshot'
-import { commitAll, gitOutput, initGitWorkspace, runGit } from './git-test-utils.js'
+import { commitAll, gitOutput, initGitWorkspace, resolvedRealPath, runGit } from './git-test-utils.js'
 
 it('isolates linked worktrees of one repository into separate snapshot stores', async () => {
   const root = await mkdtemp(join(tmpdir(), 'turnrewind-worktree-test-'))
@@ -23,8 +23,8 @@ it('isolates linked worktrees of one repository into separate snapshot stores', 
 
     // Two worktrees of one repository are two snapshot domains, not one.
     assert.notEqual(mainStore.repoDir, linkedStore.repoDir)
-    assert.equal(mainStore.workspaceDir, resolve(main))
-    assert.equal(linkedStore.workspaceDir, resolve(linked))
+    assert.equal(mainStore.workspaceDir, resolvedRealPath(main))
+    assert.equal(linkedStore.workspaceDir, resolvedRealPath(linked))
 
     const beforeStatus = await gitOutput(main, ['status', '--porcelain=v1', '-z'])
     const beforeLinkedStatus = await gitOutput(linked, ['status', '--porcelain=v1', '-z'])
@@ -67,7 +67,10 @@ it('isolates linked worktrees of one repository into separate snapshot stores', 
     await mkdir(join(linked, 'sub'))
     const subStore = createSnapshotStore(data, join(linked, 'sub'))
     assert.equal(subStore.repoDir, linkedStore.repoDir)
-    assert.equal(subStore.workspaceDir, resolve(linked))
+    // store.workspaceDir is the canonical on-disk root (same spelling
+    // gitWorkspace reports); the raw mkdtemp spelling may differ on CI
+    // (macOS /var vs /private/var, Windows 8.3 RUNNER~1 vs runneradmin).
+    assert.equal(subStore.workspaceDir, resolvedRealPath(linked))
   }
   finally {
     await rm(root, { recursive: true, force: true })
@@ -91,7 +94,7 @@ it('captures and restores through alternates when the source objects are packed'
     const before = await captureSnapshot(store, 'refs/turnrewind/packed-before', 'before')
 
     await writeFile(join(linked, 'packed.txt'), 'changed\n')
-    const after = await captureSnapshot(store, 'refs/turnrewind/packed-after', 'after', before.commit)
+    const after = await captureSnapshot(store, 'refs/turnrewind/packed-after', 'after', 'refs/turnrewind/packed-before')
     assert.notEqual(before.commit, after.commit)
 
     // The baseline blob is the source's packed object, read through the

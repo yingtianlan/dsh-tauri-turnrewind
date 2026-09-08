@@ -12,6 +12,7 @@
 import type { LocaleKey } from '../locales'
 import { TURNREWIND_CLASS_PREFIX, TURNREWIND_STYLE_ID } from '../constants'
 import { bindModalA11y } from '../utils/modal-a11y'
+import { openRecoveryPanel, setRecoveryOpener as setRecoveryOpenerChannel } from '../utils/recovery-opener'
 
 export interface UnsupportedNotice {
   id: string
@@ -31,8 +32,6 @@ interface DialogElements {
 
 let dialog: DialogElements | undefined
 let a11y: ReturnType<typeof bindModalA11y> | undefined
-/** 恢复面板入口（apply() 注入）：reason 命中恢复围栏时展示。 */
-let recoveryOpener: (() => void) | null = null
 
 // ------------------------------------------------------------------
 // 弹窗 DOM：所有颜色走 CSS variable（随主题实时切换），fallback 到硬编码值。
@@ -76,7 +75,7 @@ function ensureDialog(): DialogElements {
   recoveryButton.dataset.visible = 'false'
   recoveryButton.addEventListener('click', () => {
     hide()
-    recoveryOpener?.()
+    openRecoveryPanel()
   })
   const button = document.createElement('button')
   button.type = 'button'
@@ -89,6 +88,7 @@ function ensureDialog(): DialogElements {
 
   function hide(): void {
     backdrop.dataset.visible = 'false'
+    a11y?.restoreFocus()
   }
   button.addEventListener('click', hide)
   backdrop.addEventListener('click', (event) => {
@@ -120,11 +120,7 @@ export function disposeDialog(): void {
 
 /** 注入恢复面板入口（apply() 装配层调用）：latest-owner-wins，返回撤销函数。 */
 export function setRecoveryOpener(next: (() => void) | null): () => void {
-  recoveryOpener = next
-  return () => {
-    if (recoveryOpener === next)
-      recoveryOpener = null
-  }
+  return setRecoveryOpenerChannel(next)
 }
 
 /** 用当前活跃语言填充并显示弹窗；reason 命中恢复围栏时附「恢复面板」入口。 */

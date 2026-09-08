@@ -10,6 +10,9 @@
  *
  * 运行前请先停止对应的 DSH Host 进程；workspace 被占用时本命令会拒绝执行。
  */
+
+import process from 'node:process'
+// eslint-disable-next-line antfu/no-import-dist -- 本 CLI 的引擎就在构建产物里
 import { purgeWorkspace, resolveRootDir, WorkspaceLockBusyError } from './dist/index.js'
 
 const [target, ...args] = process.argv.slice(2)
@@ -17,17 +20,28 @@ if (!target) {
   console.error('Usage: node purge-workspace.mjs <workspace-dir> [--home <dsh-home>]')
   process.exit(1)
 }
-const homeIndex = args.indexOf('--home')
-const rootDir = resolveRootDir(homeIndex !== -1 ? args[homeIndex + 1] : undefined)
+// P2-8: --home 必须带一个非空参数，且不允许其他未知参数；否则 resolveRootDir
+// 会回退到默认 ~/.dsh 而误删错误的数据根。
+const homeArg = args.length === 0
+  ? undefined
+  : args.length === 2 && args[0] === '--home' && args[1] !== ''
+    ? args[1]
+    : undefined
+if (args.length > 0 && homeArg === undefined) {
+  console.error('Usage: node purge-workspace.mjs <workspace-dir> [--home <dsh-home>]')
+  console.error('--home requires exactly one non-empty value and no other arguments.')
+  process.exit(1)
+}
+const rootDir = resolveRootDir(homeArg)
 
 try {
   const summary = purgeWorkspace(rootDir, target)
-  console.log(`rootDir:    ${summary.rootDir}`)
-  console.log(`repoDir:    ${summary.repoDir} (${summary.repoExisted ? 'removed' : 'not present'})`)
+  console.warn(`rootDir:    ${summary.rootDir}`)
+  console.warn(`repoDir:    ${summary.repoDir} (${summary.repoExisted ? 'removed' : 'not present'})`)
   if (summary.ledger) {
-    console.log('ledger rows removed:')
+    console.warn('ledger rows removed:')
     for (const [table, count] of Object.entries(summary.ledger))
-      console.log(`  ${table}: ${count}`)
+      console.warn(`  ${table}: ${count}`)
   }
 }
 catch (error) {

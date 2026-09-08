@@ -1,9 +1,14 @@
 {
   "name": "dsh-tauri-turnrewind",
   "type": "module",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local turn-aware workspace undo for DeepSeek Harness (TypeScript). Requires the DeepSeek Harness desktop app.",
+  "author": "yingtianlan",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yingtianlan/dsh-tauri-turnrewind.git"
+  },
   "keywords": [
     "dsh",
     "plugin",
@@ -79,10 +84,5 @@
     "tsdown": "^0.17.3",
     "typescript": "~5.8.3",
     "vitest": "^4.1.11"
-  },
-  "author": "yingtianlan",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yingtianlan/dsh-tauri-turnrewind.git"
   }
 }

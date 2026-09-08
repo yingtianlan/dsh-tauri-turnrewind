@@ -58,7 +58,8 @@
     "build": "tsdown",
     "test": "vitest run test --testTimeout=120000",
     "typecheck": "tsc",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "pathe": "^2.0.3"
@@ -78,5 +79,10 @@
     "tsdown": "^0.17.3",
     "typescript": "~5.8.3",
     "vitest": "^4.1.11"
+  },
+  "author": "yingtianlan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yingtianlan/dsh-tauri-turnrewind.git"
   }
 }

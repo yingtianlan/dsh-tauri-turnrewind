@@ -191,6 +191,22 @@ it('waits for a claimed turn baseline before allowing the next step', async () =
   assert.equal(continued, true)
 })
 
+it('releases the workspace reservation when target selection throws', async () => {
+  const { root, db, runtime, active, invocation } = await setupTurn()
+  // Closing the ledger makes target selection throw (a stand-in for a real
+  // SQLITE_BUSY/IOERR). The reservation is taken before that first probe, so a
+  // throw must release it: a stranded runtime.undoing silently refuses every
+  // later undo and makes new turns skip their baseline until the host restarts.
+  db.close()
+  try {
+    await assert.rejects(() => applyUndo(runtime, active, invocation('')))
+    assert.equal(runtime.undoing, false)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 it('unblocks an aborted pre-step without cancelling baseline bookkeeping', async () => {
   let release
   const baseline = new Promise((resolvePromise) => {

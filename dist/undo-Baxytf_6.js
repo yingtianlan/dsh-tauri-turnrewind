@@ -1276,43 +1276,48 @@ async function applyUndo(runtime, active, invocation, env = {
 		}
 		runtime.undoing = false;
 	};
-	if (parsed.confirm) {
-		const claim = claimPendingPlan(runtime.db, parsed.turnId, invocation.agent.session.id);
-		if (!claim.ok) return {
-			kind: "error",
-			text: claim.error
-		};
-		pendingPlanClaimed = true;
-		runtime.undoing = true;
-		planRow = claim.row;
-		const pendingTurnId = claim.row.turn_id;
-		target = getTurn(runtime.db, pendingTurnId);
-		if (!target || !await turnRefsExist(runtime.store, target)) {
-			abortPendingPlanClaim();
-			return {
+	try {
+		if (parsed.confirm) {
+			const claim = claimPendingPlan(runtime.db, parsed.turnId, invocation.agent.session.id);
+			if (!claim.ok) return {
 				kind: "error",
-				text: "The pending plan's snapshot data no longer exists. Run /undo again to preview a fresh plan."
+				text: claim.error
 			};
-		}
-	} else if (parsed.turnId) {
-		runtime.undoing = true;
-		target = getTurn(runtime.db, parsed.turnId);
-		if (target && !await turnRefsExist(runtime.store, target)) {
-			runtime.undoing = false;
-			return {
-				kind: "error",
-				text: `The snapshot data for turn ${parsed.turnId} no longer exists (the snapshot repository was previously wiped); its changes can no longer be undone.`
-			};
-		}
-	} else {
-		runtime.undoing = true;
-		for (const candidate of listReversibleTurns(runtime.db, invocation.agent.session.id, workspaceKey$1)) {
-			if (await turnRefsExist(runtime.store, candidate)) {
-				target = candidate;
-				break;
+			pendingPlanClaimed = true;
+			runtime.undoing = true;
+			planRow = claim.row;
+			const pendingTurnId = claim.row.turn_id;
+			target = getTurn(runtime.db, pendingTurnId);
+			if (!target || !await turnRefsExist(runtime.store, target)) {
+				abortPendingPlanClaim();
+				return {
+					kind: "error",
+					text: "The pending plan's snapshot data no longer exists. Run /undo again to preview a fresh plan."
+				};
 			}
-			markTurnSnapshotMissing(runtime.db, candidate.turn_id);
+		} else if (parsed.turnId) {
+			runtime.undoing = true;
+			target = getTurn(runtime.db, parsed.turnId);
+			if (target && !await turnRefsExist(runtime.store, target)) {
+				runtime.undoing = false;
+				return {
+					kind: "error",
+					text: `The snapshot data for turn ${parsed.turnId} no longer exists (the snapshot repository was previously wiped); its changes can no longer be undone.`
+				};
+			}
+		} else {
+			runtime.undoing = true;
+			for (const candidate of listReversibleTurns(runtime.db, invocation.agent.session.id, workspaceKey$1)) {
+				if (await turnRefsExist(runtime.store, candidate)) {
+					target = candidate;
+					break;
+				}
+				markTurnSnapshotMissing(runtime.db, candidate.turn_id);
+			}
 		}
+	} catch (error) {
+		abortPendingPlanClaim();
+		throw error;
 	}
 	if (!target) {
 		runtime.undoing = false;

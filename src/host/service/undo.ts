@@ -652,46 +652,57 @@ export async function applyUndo(
     }
     runtime.undoing = false
   }
-  if (parsed.confirm) {
-    const claim = claimPendingPlan(runtime.db, parsed.turnId!, invocation.agent.session.id)
-    if (!claim.ok)
-      return { kind: 'error', text: claim.error }
-    pendingPlanClaimed = true
-    // Reserve the workspace before the first await so another confirm route
-    // cannot start a concurrent restore during snapshot validation.
-    runtime.undoing = true
-    planRow = claim.row
-    const pendingTurnId = claim.row.turn_id
-    target = getTurn(runtime.db, pendingTurnId)
-    if (!target || !await turnRefsExist(runtime.store, target)) {
-      abortPendingPlanClaim()
-      return { kind: 'error', text: 'The pending plan\'s snapshot data no longer exists. Run /undo again to preview a fresh plan.' }
+  // Target selection runs BEFORE the execution try/finally below, so a thrown
+  // probe (SQLite IOERR/BUSY while reading the ledger) must release the
+  // reservation and any claimed plan explicitly. A stranded runtime.undoing
+  // would silently refuse every later undo AND make new turns skip their
+  // baseline (TURNREWIND_WORKSPACE_BUSY) until the host restarts.
+  try {
+    if (parsed.confirm) {
+      const claim = claimPendingPlan(runtime.db, parsed.turnId!, invocation.agent.session.id)
+      if (!claim.ok)
+        return { kind: 'error', text: claim.error }
+      pendingPlanClaimed = true
+      // Reserve the workspace before the first await so another confirm route
+      // cannot start a concurrent restore during snapshot validation.
+      runtime.undoing = true
+      planRow = claim.row
+      const pendingTurnId = claim.row.turn_id
+      target = getTurn(runtime.db, pendingTurnId)
+      if (!target || !await turnRefsExist(runtime.store, target)) {
+        abortPendingPlanClaim()
+        return { kind: 'error', text: 'The pending plan\'s snapshot data no longer exists. Run /undo again to preview a fresh plan.' }
+      }
     }
-  }
-  else if (parsed.turnId) {
-    // Reserve before the first await so a concurrent direct-execute cannot
-    // build a plan against disk state this invocation is about to change.
-    runtime.undoing = true
-    target = getTurn(runtime.db, parsed.turnId)
-    if (target && !await turnRefsExist(runtime.store, target)) {
-      runtime.undoing = false
-      return {
-        kind: 'error',
-        text: `The snapshot data for turn ${parsed.turnId} no longer exists (the snapshot repository was previously wiped); its changes can no longer be undone.`,
+    else if (parsed.turnId) {
+      // Reserve before the first await so a concurrent direct-execute cannot
+      // build a plan against disk state this invocation is about to change.
+      runtime.undoing = true
+      target = getTurn(runtime.db, parsed.turnId)
+      if (target && !await turnRefsExist(runtime.store, target)) {
+        runtime.undoing = false
+        return {
+          kind: 'error',
+          text: `The snapshot data for turn ${parsed.turnId} no longer exists (the snapshot repository was previously wiped); its changes can no longer be undone.`,
+        }
+      }
+    }
+    else {
+      runtime.undoing = true
+      // Walk newest-first and skip turns whose snapshot refs died with a wiped
+      // snapshot repository, marking them so later /undo runs never re-check.
+      for (const candidate of listReversibleTurns(runtime.db, invocation.agent.session.id, workspaceKey)) {
+        if (await turnRefsExist(runtime.store, candidate)) {
+          target = candidate
+          break
+        }
+        markTurnSnapshotMissing(runtime.db, candidate.turn_id)
       }
     }
   }
-  else {
-    runtime.undoing = true
-    // Walk newest-first and skip turns whose snapshot refs died with a wiped
-    // snapshot repository, marking them so later /undo runs never re-check.
-    for (const candidate of listReversibleTurns(runtime.db, invocation.agent.session.id, workspaceKey)) {
-      if (await turnRefsExist(runtime.store, candidate)) {
-        target = candidate
-        break
-      }
-      markTurnSnapshotMissing(runtime.db, candidate.turn_id)
-    }
+  catch (error) {
+    abortPendingPlanClaim()
+    throw error
   }
   if (!target) {
     runtime.undoing = false
